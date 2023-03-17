@@ -108,8 +108,7 @@ def test_multiple_vrt():
         assert len(vrt_separate.raster_bands) == len(test_raster_paths)
         assert len(vrt_separate.raster_bands[0].sources) == 1
 
-
-   
+  
 
 def test_main():
 
