@@ -18,10 +18,33 @@ def get_resampling_gdal_to_numpy():
     for value in Resampling.__dict__:
         if value.startswith("_") or value.endswith("_"):
             continue
+        resampling = getattr(Resampling, value)
+        if resampling in resamplings.values():
+            continue
 
-        resamplings[value.capitalize()] = getattr(Resampling, value)
+        resamplings[value.capitalize()] = resampling
 
     return resamplings
+
+
+def new_element(tag: str, text: str | None = None, attributes: dict[str, str] | None = None) -> ET.Element:
+
+    if attributes is None:
+        attributes = {}
+
+    elem = ET.Element(tag, {str(k): number_to_gdal(v) for k, v in attributes.items()})
+    if text is not None:
+        elem.text = str(text)
+    return elem
+
+
+def number_to_gdal(number: float | int | str) -> str:
+    if isinstance(number, str):
+        return number
+
+    if isinstance(number, int):
+        return str(number)
+    return str(int(number)) if number.is_integer() else str(number)
 
 
 def resampling_gdal_to_rio(string: str) -> Resampling:
@@ -108,6 +131,36 @@ def build_vrt(
         VRTNodata=vrt_nodata,
         strict=strict,
     )
+
+
+def build_warped_vrt(
+    vrt_filepath: Path | str,
+    filepath: Path | str,
+    dst_crs: CRS | int | str,
+    resample_algorithm: Resampling = Resampling.bilinear,
+    max_error: float = 0.125,
+    src_crs: CRS | int | str | None = None,
+) -> None:
+
+    crss = {"dst_wkt": dst_crs, "src_wkt": src_crs}
+    for key, crs in crss.items():
+        if crs is None:
+            if key == "dst_wkt":
+                raise TypeError("dst_crs has to be provided")
+            continue
+        if isinstance(crs, int):
+            crss[key] = CRS.from_epsg(crs).to_wkt()
+        elif isinstance(crs, CRS):
+            crss[key] = crs.to_wkt()
+        else:
+            crss[key] = crs
+
+    dataset = gdal.Open(str(filepath))
+    vrt_dataset = gdal.AutoCreateWarpedVRT(dataset, crss["src_wkt"], crss["dst_wkt"], resample_algorithm, max_error)
+    vrt_dataset.GetDriver().CreateCopy(str(vrt_filepath), vrt_dataset)
+
+    del dataset
+    del vrt_dataset
 
 
 class VRTStep:
@@ -272,7 +325,7 @@ class ComplexSource:
         if not source_filename.startswith("/vsi"):
             source_filename = Path(source_filename)
 
-        source_band = int(elem.find("SourceBand").text)
+        source_band = int(getattr(elem.find("SourceBand"), "text", 1))
 
         if (prop_elem := elem.find("SourceProperties")) is not None:
             source_properties = SourceProperties.from_etree(prop_elem)
@@ -394,7 +447,10 @@ class VRTRasterBand:
         dtype = elem.get("dataType").lower()
         band = int(elem.get("band"))
 
-        nodata = float(elem.find("NoDataValue").text)
+        if (sub_elem := elem.find("NoDataValue")) is not None:
+            nodata = float(sub_elem.text)
+        else:
+            nodata = None
 
         color_interp = getattr(elem.find("ColorInterp"), "text", "undefined")
 
@@ -435,19 +491,91 @@ class WarpedVRTRasterBand(VRTRasterBand):
 
     def to_etree(self):
 
-        band = ET.Element("VRTRasterBand", {"dataType": dtype_numpy_to_gdal(self.dtype), "band": str(self.band), "subClass": "VRTWarpedRasterBand"})
+        band = ET.Element(
+            "VRTRasterBand",
+            {"dataType": dtype_numpy_to_gdal(self.dtype), "band": str(self.band), "subClass": "VRTWarpedRasterBand"},
+        )
 
-        color_interp_elem = ET.SubElement(band, "ColorInterp") 
+        color_interp_elem = ET.SubElement(band, "ColorInterp")
         color_interp_elem.text = self.color_interp
 
         return band
-        
+
+
+class VRTDerivedRasterBand(VRTRasterBand):
+    dtype: str
+    band: int
+    nodata: int | float | None
+    color_interp: str
+    sources: list[ComplexSource | SimpleSource]
+    pixel_function: str
+    pixel_function_arguments: dict[str, str] | None
+    pixel_function_code: str | None
+    pixel_function_language: Literal["Python"] | None
+
+    def __init__(
+        self,
+        dtype: str,
+        band: int,
+        nodata: int | float | None,
+        color_interp: str,
+        sources: list[ComplexSource | SimpleSource],
+        pixel_function: str,
+        pixel_function_arguments: dict[str, str] | None = None,
+        pixel_function_code: str | None = None,
+        pixel_function_language: Literal["Python"] | None = None
+    ):
+        self.dtype = dtype
+        self.band = band
+        self.nodata = nodata
+        self.color_interp = color_interp
+        self.sources = sources
+        self.pixel_function = pixel_function
+        self.pixel_function_arguments = pixel_function_arguments
+        self.pixel_function_code = pixel_function_code
+
+        if pixel_function_language is not None and pixel_function_language != "Python":
+            raise ValueError("The pixel function language has to the 'Python' or None")
+        self.pixel_function_language = pixel_function_language
+
+    @classmethod
+    def from_etree(cls, elem: ET.Element):
+        sub_class = elem.get("subClass")
+        assert sub_class == "VRTDerivedRasterBand", f"Wrong subclass. Expected VRTDerivedRasterBand, got {sub_class}"
+
+        base = VRTRasterBand.from_etree(elem)
+
+        pixel_function = elem.find("PixelFunctionType").text
+
+        pixel_function_language = getattr(elem.find("PixelFunctionLanguage"), "text", None)
+
+        if (sub_elem := elem.find("PixelFunctionArguments")) is not None:
+            pixel_function_arguments = dict(sub_elem.items())
+        else:
+            pixel_function_arguments = None
+
+        pixel_function_code = getattr(elem.find("PixelFunctionCode"), "text", None)
+
+        return cls(
+            dtype=base.dtype,
+            band=base.band,
+            nodata=base.nodata,
+            color_interp=base.color_interp,
+            sources=base.sources,
+            pixel_function=pixel_function,
+            pixel_function_arguments=pixel_function_arguments,
+            pixel_function_code=pixel_function_code,
+            pixel_function_language=pixel_function_language,
+        )
+
+    def to_etree(self):
+        raise NotImplementedError()
 
 
 def raster_band_from_etree(elem: ET.Element):
 
     if elem.tag != "VRTRasterBand":
-        raise ValueError("Invalid raster band tag: {elem.tag}")
+        raise ValueError(f"Invalid raster band tag: {elem.tag}")
 
     subclass = elem.get("subClass")
 
@@ -456,6 +584,9 @@ def raster_band_from_etree(elem: ET.Element):
 
     if subclass == "VRTWarpedRasterBand":
         return WarpedVRTRasterBand.from_etree(elem)
+
+    if subclass == "VRTDerivedRasterBand":
+        return VRTDerivedRasterBand.from_etree(elem)
 
     warnings.warn(f"Unknown VRTRasterBand class: '{subclass}'. Trying to treat as a classless VRTRasterBand")
     return VRTRasterBand.from_etree(elem)
@@ -506,8 +637,8 @@ class VRTDataset:
     def to_etree(self):
         vrt = ET.Element("VRTDataset", {"rasterXSize": str(self.shape[1]), "rasterYSize": str(self.shape[0])})
 
-        if self.subclass is not None:
-            vrt.set("subClass", self.subclass)
+        # if self.subclass is not None:
+        #    vrt.set("subClass", self.subclass)
 
         crs = ET.SubElement(vrt, "SRS", {"dataAxisToSRSAxisMapping": self.crs_mapping})
         crs.text = self.crs.to_wkt()
@@ -530,12 +661,12 @@ class VRTDataset:
         x_size, y_size = [int(root.get(f"raster{k}Size")) for k in ["X", "Y"]]
 
         srs_elem = root.find("SRS")
-        crs = CRS.from_wkt(srs_elem.text)
+        crs = CRS.from_string(srs_elem.text)
         crs_mapping = srs_elem.get("dataAxisToSRSAxisMapping")
 
         geotransform_elem = root.find("GeoTransform")
 
-        transform = Affine.from_gdal(*[float(v) for v in geotransform_elem.text.split(", ")])
+        transform = parse_gdal_transform(geotransform_elem.text)
 
         raster_bands = []
         for band in root.findall("VRTRasterBand"):
@@ -562,7 +693,7 @@ class VRTDataset:
             outfile.write(self.to_xml())
 
     @classmethod
-    def from_files(cls, filepaths: Path | str | list[Path | str], **kwargs):
+    def from_file(cls, filepaths: Path | str | list[Path | str], **kwargs):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_vrt = Path(temp_dir).joinpath("temp.vrt")
 
@@ -655,7 +786,7 @@ class WarpedVRTDataset(VRTDataset):
         warp_options = root.find("GDALWarpOptions")
 
         resample_algorithm = resampling_gdal_to_rio(warp_options.find("ResampleAlg").text)
-        dst_dtype = warp_options.find("WorkingDataType").text
+        dst_dtype = dtype_gdal_to_numpy(warp_options.find("WorkingDataType").text)
         warp_memory_limit = float(warp_options.find("WarpMemoryLimit").text)
 
         source_dataset_elem = warp_options.find("SourceDataset")
@@ -668,7 +799,7 @@ class WarpedVRTDataset(VRTDataset):
 
         options = {}
         for option_elem in warp_options.findall("Option"):
-            options[option_elem.tag] = option_elem.text
+            options[option_elem.get("name")] = option_elem.text
 
         transformer = warp_options.find("Transformer").find("ApproxTransformer")
 
@@ -709,7 +840,10 @@ class WarpedVRTDataset(VRTDataset):
         )
 
     def to_etree(self):
-        vrt = ET.Element("VRTDataset", {"rasterXSize": str(self.shape[1]), "rasterYSize": str(self.shape[0]), "subClass": "VRTWarpedDataset"})
+        vrt = ET.Element(
+            "VRTDataset",
+            {"rasterXSize": str(self.shape[1]), "rasterYSize": str(self.shape[0]), "subClass": "VRTWarpedDataset"},
+        )
 
         crs = ET.SubElement(vrt, "SRS", {"dataAxisToSRSAxisMapping": self.crs_mapping})
         crs.text = self.crs.to_wkt()
@@ -720,11 +854,61 @@ class WarpedVRTDataset(VRTDataset):
         for band in self.raster_bands:
             vrt.append(band.to_etree())
 
+        for i, dim in enumerate(["X", "Y"]):
+            size = ET.SubElement(vrt, f"Block{dim}Size")
+            size.text = str(self.block_size[i])
+
+        warp = ET.SubElement(vrt, "GDALWarpOptions")
+
+        warp.append(new_element("WarpMemoryLimit", str(self.warp_memory_limit)))
+        warp.append(new_element("ResampleAlg", resampling_rio_to_gdal(self.resample_algorithm)))
+
+        warp.append(
+            new_element(
+                "WorkingDataType",
+                dtype_numpy_to_gdal(self.dst_dtype),
+            )
+        )
+
+        for key in self.options:
+            warp.append(new_element("Option", self.options[key], {"name": key}))
+
+        warp.append(
+            new_element("SourceDataset", str(self.source_dataset), {"relativeToVRT": str(int(self.relative_filename))})
+        )
+
+        transformer = ET.SubElement(ET.SubElement(warp, "Transformer"), "ApproxTransformer")
+
+        transformer.append(new_element("MaxError", str(self.max_error)))
+
+        base_tr = ET.SubElement(ET.SubElement(transformer, "BaseTransformer"), "GenImgProjTransformer")
+
+        for key, gdal_key in [
+            ("src_transform", "SrcGeoTransform"),
+            ("src_inv_transform", "SrcInvGeoTransform"),
+            ("dst_transform", "DstGeoTransform"),
+            ("dst_inv_transform", "DstInvGeoTransform"),
+        ]:
+            base_tr.append(new_element(gdal_key, transform_to_gdal(getattr(self, key)).replace(" ", "")))
+
+        band_list = ET.SubElement(warp, "BandList")
+
+        for src, dst in self.band_mapping:
+            band_list.append(new_element("BandMapping", None, {"src": src, "dst": dst}))
+
         return vrt
+
+    @classmethod
+    def from_file(cls, filepath: Path | str, dst_crs: CRS | int | str, **kwargs):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_vrt = Path(temp_dir).joinpath("temp.vrt")
+
+            build_warped_vrt(vrt_filepath=temp_vrt, filepath=filepath, dst_crs=dst_crs, **kwargs)
+            return cls.load_vrt(temp_vrt)
 
 
 def transform_to_gdal(transform: Affine) -> str:
-    return ", ".join(map(str, transform.to_gdal()))
+    return ", ".join(map(number_to_gdal, transform.to_gdal()))
 
 
 def parse_gdal_transform(string: str) -> Affine:
@@ -743,10 +927,15 @@ def main():
 
     # print(raster2)
 
-    raster = WarpedVRTDataset.load_vrt("example_data/warped_vrt.vrt")
+    # raster = WarpedVRTDataset.load_vrt("example_data/warped_vrt.vrt")
 
-    #raster.save_vrt("warped.vrt")
+    # raster = WarpedVRTDataset.from_file("Marma_DEM_2008.tif", dst_crs=32633)
+    raster = VRTDataset.load_vrt("example_data/derived_vrt_python.vrt")
+
     print(raster.to_xml())
+
+    # raster.save_vrt("warped.vrt")
+    # print(raster.to_xml())
 
     # vrt = ET.Element("VRTDataset", {"rasterXSize": str(raster.shape[1]), "rasterYsize": str(raster.shape[0]) })
 
