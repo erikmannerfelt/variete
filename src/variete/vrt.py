@@ -467,11 +467,13 @@ class WarpedVRTRasterBand(VRTRasterBand):
     dtype: str
     band: int
     color_interp: str
+    nodata: float | int | None
 
-    def __init__(self, dtype: str, band: int, color_interp: str):
+    def __init__(self, dtype: str, band: int, color_interp: str, nodata: float | int | None = None):
         self.dtype = dtype
         self.band = band
         self.color_interp = color_interp
+        self.nodata = nodata
 
     def __repr__(self):
         return f"WarpedVRTRasterBand: dtype: {self.dtype}, band: {self.band}, nodata: {self.nodata}, color_interp: {self.color_interp}"
@@ -487,7 +489,12 @@ class WarpedVRTRasterBand(VRTRasterBand):
 
         color_interp = getattr(elem.find("ColorInterp"), "text", "undefined")
 
-        return cls(dtype=dtype, band=band, color_interp=color_interp)
+        if (sub_elem := elem.find("NoDataValue")) is not None:
+            nodata = float(sub_elem.text)
+        else:
+            nodata = None
+
+        return cls(dtype=dtype, band=band, color_interp=color_interp, nodata=nodata)
 
     def to_etree(self):
 
@@ -498,6 +505,10 @@ class WarpedVRTRasterBand(VRTRasterBand):
 
         color_interp_elem = ET.SubElement(band, "ColorInterp")
         color_interp_elem.text = self.color_interp
+
+        if self.nodata is not None:
+            nodata_elem = ET.SubElement(band, "NoDataValue")
+            nodata_elem.text = number_to_gdal(self.nodata)
 
         return band
 
@@ -904,7 +915,16 @@ class WarpedVRTDataset(VRTDataset):
             temp_vrt = Path(temp_dir).joinpath("temp.vrt")
 
             build_warped_vrt(vrt_filepath=temp_vrt, filepath=filepath, dst_crs=dst_crs, **kwargs)
-            return cls.load_vrt(temp_vrt)
+
+            vrt = cls.load_vrt(temp_vrt)
+
+        # Nodata values are not transferred with GDALs WarpedVRT builder, so this has to be done manually
+        with rio.open(filepath) as raster:
+            for band in vrt.raster_bands:
+                band.nodata = raster.nodata
+
+        return vrt
+
 
 
 def transform_to_gdal(transform: Affine) -> str:
@@ -930,7 +950,13 @@ def main():
     # raster = WarpedVRTDataset.load_vrt("example_data/warped_vrt.vrt")
 
     # raster = WarpedVRTDataset.from_file("Marma_DEM_2008.tif", dst_crs=32633)
-    raster = VRTDataset.load_vrt("example_data/derived_vrt_python.vrt")
+    #raster = VRTDataset.load_vrt("example_data/derived_vrt_python.vrt")
+    raster = WarpedVRTDataset.from_file("Marma_DEM_2021.tif", 32633)
+
+    #raster.raster_bands[0].nodata = -9999
+
+    raster.save_vrt("warp.vrt")
+
 
     print(raster.to_xml())
 
