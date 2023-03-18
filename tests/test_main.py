@@ -27,7 +27,7 @@ def test_create_vrt():
         test_raster = Path(temp_dir).joinpath("test.tif")
         raster = make_test_raster(test_raster)
 
-        vrt = vrtraster.VRTDataset.from_files(test_raster)
+        vrt = vrtraster.VRTDataset.from_file(test_raster)
 
         assert vrt.transform == raster["transform"]
         assert vrt.crs == raster["crs"]
@@ -89,7 +89,7 @@ def test_multiple_vrt():
         #raise NotImplementedError()
         
             
-        vrt_mosaic = vrtraster.VRTDataset.from_files(test_raster_paths, separate=False)
+        vrt_mosaic = vrtraster.VRTDataset.from_file(test_raster_paths, separate=False)
 
         assert vrt_mosaic.crs == rasters[0]["crs"]
         assert vrt_mosaic.transform == rasters[0]["transform"]
@@ -101,7 +101,7 @@ def test_multiple_vrt():
         for i, source in enumerate(vrt_mosaic.raster_bands[0].sources):
             assert source.source_filename == test_raster_paths[i]
 
-        vrt_separate = vrtraster.VRTDataset.from_files(test_raster_paths, separate=True)
+        vrt_separate = vrtraster.VRTDataset.from_file(test_raster_paths, separate=True)
 
         assert vrt_separate.crs == rasters[0]["crs"]
         assert vrt_separate.transform == rasters[0]["transform"]
