@@ -1,4 +1,4 @@
-import vrtraster.main as vrtraster
+import variete.vrt as vrtraster
 import tempfile
 from pathlib import Path 
 import rasterio as rio
