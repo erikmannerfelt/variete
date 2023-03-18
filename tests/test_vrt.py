@@ -1,4 +1,5 @@
 import variete.vrt as vrtraster
+from variete import vrt
 import tempfile
 from pathlib import Path 
 import rasterio as rio
@@ -108,6 +109,24 @@ def test_multiple_vrt():
         assert len(vrt_separate.raster_bands) == len(test_raster_paths)
         assert len(vrt_separate.raster_bands[0].sources) == 1
 
+
+def test_warped_vrt():
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        make_test_raster(test_raster_path)
+
+        warped = vrt.WarpedVRTDataset.from_file(test_raster_path, dst_crs=32634)
+        vrt_path = test_raster_path.with_suffix(".vrt")
+        warped.save_vrt(vrt_path)
+
+        with rio.open(vrt_path) as raster:
+            assert raster.crs.to_epsg() == 32634
+            assert raster.nodata == -9999
+        
+
+
+    
   
 
 def test_main():
