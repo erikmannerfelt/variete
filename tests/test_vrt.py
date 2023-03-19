@@ -6,6 +6,8 @@ import rasterio as rio
 import rasterio.warp
 import numpy as np
 import warnings
+import os
+import pytest
 
 
 def make_test_raster(filepath: Path, nodata: float = -9999., mean_val: int | float | None = None):
@@ -15,7 +17,7 @@ def make_test_raster(filepath: Path, nodata: float = -9999., mean_val: int | flo
     data = np.multiply(*np.meshgrid(
         np.sin(np.linspace(0, np.pi * 2, 100)) * 5,
         np.sin(np.linspace(0, np.pi / 2, 50)) * 10,
-    ))
+    )).astype("float32")
 
     if mean_val is not None:
         data += mean_val
@@ -24,7 +26,6 @@ def make_test_raster(filepath: Path, nodata: float = -9999., mean_val: int | flo
         raster.write(data, 1)
 
     return {"crs": crs, "transform": transform, "data": data}
-
 
 def test_create_vrt():
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -139,13 +140,16 @@ def create_vrt():
 
 
 def test_with_open():
-
     raster_params, vrt = create_vrt()
 
     with vrt.open_rio() as raster:
         assert raster.crs == raster_params["crs"]
         assert raster.transform == raster_params["transform"]
-   
+
+    memfile = vrt.to_memfile()
+
+    assert isinstance(memfile, rio.MemoryFile)
+
 
 def test_load_vrt():
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -220,8 +224,92 @@ def test_pixel_function():
         assert np.round(np.nanmean((added_raster - constant) / raster_params["data"]), 4) == 2.0
             
 
+def test_copy():
+
+    _, vrt_a = create_vrt()
+
+    vrt_a_copy = vrt_a.copy()
+
+    vrt_a.crs = "1"
+    vrt_a.raster_bands[0].sources[0].source_filename = "f"
+
+    assert vrt_a_copy.crs != "1"
+    assert vrt_a_copy.raster_bands[0].sources[0].source_filename != "f"
+
+    
+
+def test_open_nested():
+    warnings.simplefilter("error")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        make_test_raster(test_raster_path, nodata=None, mean_val=5)
+
+        #vrt_path = test_raster_path.with_suffix(".vrt")
+        vrt_a = variete.vrt.VRTDataset.from_file(test_raster_path)
+
+        vrt_b = vrt_a.copy()
+        #vrt2 = vrt.copy()
+        vrt_a.raster_bands[0].sources[0].source_filename = vrt_b
+
+        with pytest.raises(ValueError):
+            vrt_a.open_rio()
+            vrt_a.to_memfile()
+
+        temp_dir2, reader = vrt_a.open_rio_nested()
+        with reader() as raster:
+            assert raster.crs == vrt_a.crs
+
+        temp_dir2.cleanup()
+            
+            
+def test_to_tempfiles():
+    warnings.simplefilter("error")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        make_test_raster(test_raster_path, nodata=None, mean_val=5)
+
+        #vrt_path = test_raster_path.with_suffix(".vrt")
+        vrt_a = variete.vrt.VRTDataset.from_file(test_raster_path)
+
+        vrt_b = vrt_a.copy()
+        #vrt2 = vrt.copy()
+        vrt_a.raster_bands[0].sources[0].source_filename = vrt_b
+
+        temp_dir2, temp_a_filepath = vrt_a.to_tempfiles()
+
+        loaded_vrt_a = variete.vrt.load_vrt(temp_a_filepath)
+
+        assert vrt_a.crs == loaded_vrt_a.crs
+
+        temp_filepaths = os.listdir(temp_dir2.name)
+        assert len(temp_filepaths) == 2
+
+        temp_b_filepath = Path(temp_dir2.name).joinpath([p for p in temp_filepaths if p != temp_a_filepath.name][0])
+
+        assert loaded_vrt_a.raster_bands[0].sources[0].source_filename == temp_b_filepath
+
+        temp_dir2.cleanup()
+
+
+def test_sample():
+    warnings.simplefilter("error")
         
         
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        raster_params = make_test_raster(test_raster_path, nodata=None, mean_val=5)
+
+        #vrt_path = test_raster_path.with_suffix(".vrt")
+        vrt = variete.vrt.VRTDataset.from_file(test_raster_path)
+
+        
+        left, upper = vrt.transform.c + vrt.res()[0] / 2, vrt.transform.f - vrt.res()[1] / 2
+
+        sampled = vrt.sample(left, upper)
+
+        assert sampled == raster_params["data"][0, 0]
+
 
     
   

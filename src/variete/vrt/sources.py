@@ -1,7 +1,13 @@
+from __future__ import annotations
 import warnings
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import copy
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from variete.vrt.vrt import VRTDataset
 
 class SourceProperties:
     shape: tuple[int, int]
@@ -79,7 +85,7 @@ class Window:
 
 
 class ComplexSource:
-    source_filename: Path | str
+    source_filename: Path | str | VRTDataset
     source_band: int
     source_properties: SourceProperties | None
     relative_filename: bool
@@ -144,6 +150,9 @@ class ComplexSource:
     def to_etree(self):
         source_xml = ET.Element(self.source_kind)
 
+        if hasattr(self.source_filename, "to_etree"):
+            raise NotImplementedError()
+
         filename_xml = ET.SubElement(
             source_xml, "SourceFilename", attrib={"relativeToVRT": str(int(self.relative_filename))}
         )
@@ -154,8 +163,11 @@ class ComplexSource:
 
         if self.source_properties is not None:
             source_xml.append(self.source_properties.to_etree())
-        source_xml.append(self.src_window.to_etree("SrcRect"))
-        source_xml.append(self.dst_window.to_etree("DstRect"))
+
+        if self.src_window is not None:
+            source_xml.append(self.src_window.to_etree("SrcRect"))
+        if self.dst_window is not None:
+            source_xml.append(self.dst_window.to_etree("DstRect"))
 
         if self.nodata is not None:
             nodata_xml = ET.SubElement(source_xml, "NODATA")
@@ -174,15 +186,24 @@ class ComplexSource:
         if not source_filename.startswith("/vsi"):
             source_filename = Path(source_filename)
 
-        source_band = int(getattr(elem.find("SourceBand"), "text", 1))
+        source_band = 1
+        if (sub_elem := elem.find("SourceBand")) is not None:
+            if (text := sub_elem.text) is not None:
+                if text.isnumeric():
+                    source_band = int(text)
+        #source_band = int(getattr(elem.find("SourceBand"), "text", 1))
 
         if (prop_elem := elem.find("SourceProperties")) is not None:
             source_properties = SourceProperties.from_etree(prop_elem)
         else:
             source_properties = None
 
-        src_window = Window.from_etree(elem.find("SrcRect"))
-        dst_window = Window.from_etree(elem.find("DstRect"))
+        src_window = dst_window = None
+        if (sub_elem := elem.find("SrcRect")) is not None:
+            src_window = Window.from_etree(sub_elem)
+
+        if (sub_elem := elem.find("DstRect")) is not None:
+            dst_window = Window.from_etree(sub_elem)
 
         if (nodata_elem := elem.find("NODATA")) is not None:
             nodata = float(nodata_elem.text)
@@ -202,7 +223,7 @@ class ComplexSource:
 
 
 class SimpleSource(ComplexSource):
-    source_filename: Path | str
+    source_filename: Path | str | "VRTDataset"
     source_band: int
     source_properties: None
     nodata: None

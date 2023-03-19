@@ -87,6 +87,8 @@ def pixel_function_from_etree(elem: ET.Element) -> AnyPixelFunction:
     if code is None:
         if name == "sum":
             return SumPixelFunction(arguments["k"])
+        if name == "scale":
+            return ScalePixelFunction()
         raise ValueError(f"Empty PixelFunctionCode and unknown type: {name}")
 
     return PixelFunction(name=name, arguments=arguments, code=code, language=language)

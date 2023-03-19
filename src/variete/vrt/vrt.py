@@ -3,7 +3,7 @@ from pathlib import Path
 import rasterio as rio
 from affine import Affine
 import xml.etree.ElementTree as ET
-from typing import Literal, Callable
+from typing import Literal, Callable, Iterable
 import tempfile
 from osgeo import gdal
 from rasterio.coords import BoundingBox
@@ -11,6 +11,11 @@ from rasterio.warp import Resampling
 import warnings
 from variete.vrt.raster_bands import AnyRasterBand, WarpedVRTRasterBand, raster_band_from_etree
 from variete import misc
+import copy
+from contextlib import contextmanager, ExitStack
+from tempfile import TemporaryDirectory
+import hashlib
+import numpy as np
 
 
 def build_vrt(
@@ -180,6 +185,9 @@ class VRTDataset:
             shape=(y_size, x_size), crs=crs, transform=transform, raster_bands=raster_bands, crs_mapping=crs_mapping
         )
 
+    def copy(self):
+        return copy.deepcopy(self)
+
     @classmethod
     def from_xml(cls, xml: str):
         vrt = ET.fromstring(xml)
@@ -202,12 +210,79 @@ class VRTDataset:
             build_vrt(output_filepath=temp_vrt, filepaths=filepaths, **kwargs)
             return cls.load_vrt(temp_vrt)
 
+    def sha1(self) -> str:
+        return hashlib.sha1(str(self.__dict__).encode()).hexdigest()
+
+    def is_nested(self) -> bool:
+        for raster_band in self.raster_bands:
+            for source in raster_band.sources:
+                if hasattr(source.source_filename, "to_tempfiles"):
+                    return True
+        return False
+    
+    def to_tempfiles(self, temp_dir: TemporaryDirectory | str | Path | None = None) -> tuple[TemporaryDirectory, Path]:
+
+        if temp_dir is None:
+            temp_dir = TemporaryDirectory(prefix="variete")
+
+        vrt = self.copy()
+        for raster_band in vrt.raster_bands:
+            for source in raster_band.sources:
+                if hasattr(source.source_filename, "to_tempfiles"):
+                    _, new_filepath = source.source_filename.to_tempfiles(temp_dir=temp_dir)
+                    source.source_filename = new_filepath
+                    source.relative_filename = False
+
+        temp_dir_path = Path(getattr(temp_dir, "name", temp_dir))
+
+        filepath = temp_dir_path.joinpath(vrt.sha1()).with_suffix(".vrt")
+
+        vrt.save_vrt(filepath)
+
+        return temp_dir, filepath
+                    
+
     def to_memfile(self) -> rio.MemoryFile:
+        if self.is_nested():
+            raise ValueError("Nested VRTs require temporary saving to work (see to_memfile_nested")
         return rio.MemoryFile(self.to_xml().encode(), ext=".vrt")
+
+    def to_memfile_nested(self, temp_dir: TemporaryDirectory | str | Path | None) -> tuple[TemporaryDirectory, rio.MemoryFile]:
+        if not self.is_nested():
+            return (temp_dir, self.to_memfile())  
+
+        if temp_dir is None:
+            temp_dir = TemporaryDirectory(prefix="variete")
+
+        _, filepath = self.to_tempfiles(temp_dir=temp_dir)
+
+        with open(filepath, "rb") as infile:
+            return (temp_dir, rio.MemoryFile(infile.read()))
 
     @property
     def open_rio(self) -> Callable[None, rio.DatasetReader]:
+        if self.is_nested():
+            raise ValueError("Nested VRTs require temporary saving to work (see open_rio_nested")
         return self.to_memfile().open
+
+    def open_rio_nested(self, temp_dir: TemporaryDirectory | str | Path | None = None) -> tuple[TemporaryDirectory, Callable[None, rio.DatasetReader]]:
+        if not self.is_nested():
+            return (temp_dir, self.open_rio)
+
+        if temp_dir is None:
+            temp_dir = TemporaryDirectory(prefix="variete")
+
+        return (temp_dir, self.to_memfile_nested(temp_dir=temp_dir)[1].open)
+
+    def sample(self, x_coord: float, y_coord: float, band: int | list[int] = 1, masked: bool = False):
+        if not isinstance(x_coord, Iterable):
+            x_coord = [x_coord]
+            y_coord = [y_coord]
+        with self.open_rio() as raster:
+            values = np.fromiter(raster.sample(zip(x_coord, y_coord), indexes=band, masked=masked), dtype=self.raster_bands[band - 1].dtype, count=len(x_coord)).ravel()
+            if values.size > 1:
+                return values
+            return values[0]
 
 
 class WarpedVRTDataset(VRTDataset):
@@ -424,9 +499,10 @@ class WarpedVRTDataset(VRTDataset):
         return vrt
 
 
+AnyVRTDataset = VRTDataset | WarpedVRTDataset
 
 
-def dataset_from_etree(elem: ET.Element) -> VRTDataset | WarpedVRTDataset:
+def dataset_from_etree(elem: ET.Element) -> AnyVRTDataset:
 
     if elem.tag != "VRTDataset":
         raise ValueError(f"Invalid root tag for VRT: {elem.tag}")
@@ -442,7 +518,7 @@ def dataset_from_etree(elem: ET.Element) -> VRTDataset | WarpedVRTDataset:
     return VRTDataset.from_etree(elem)
 
 
-def load_vrt(filepath: str | Path) -> VRTDataset | WarpedVRTDataset:
+def load_vrt(filepath: str | Path) -> AnyVRTDataset:
     with open(filepath) as infile:
         root = ET.fromstring(infile.read())
 
