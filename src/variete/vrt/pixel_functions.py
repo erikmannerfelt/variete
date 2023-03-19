@@ -15,10 +15,8 @@ class PixelFunction:
         code: str | None = None,
         language: Literal["Python"] | None = None,
     ):
-        self.name = name
-        self.arguments = arguments
-        self.code = code
-        self.language = language
+        for attr in ["arguments", "name", "code", "language"]:
+            setattr(self, attr, locals()[attr])
 
     def validate(self, n_bands: int):
         assert len(self.name) > 0, "The PixelFunction must have a name"

@@ -26,7 +26,6 @@ class VRaster:
     def __init__(self, steps: list[VRasterStep] | None = None):
         self.steps = steps or []
 
-
     @classmethod
     def load_file(cls, filepath: str | Path):
         step = VRasterStep(
@@ -64,6 +63,33 @@ class VRaster:
         new_vraster.steps.append(VRasterStep(new, "add"))
         return new_vraster
 
+    def multiply(self, other: int | float) -> "VRaster":
+        new_vraster = self.copy()
+        prev = new_vraster.steps[-1].dataset
+
+        new = prev.copy()
+        for i, band in enumerate(new.raster_bands):
+            if isinstance(band, VRTDerivedRasterBand):
+                if band.offset is not None:
+                    band.scale *= other
+                else:
+                    band.scale = other
+            else:
+                new_band = VRTDerivedRasterBand.from_raster_band(
+                    band=band,
+                    pixel_function=ScalePixelFunction()
+                )
+                new_band.sources = [
+                    SimpleSource(
+                        source_filename=prev,
+                    )
+                ]
+                new_band.scale = other
+
+                new.raster_bands[i] = new_band
+
+        new_vraster.steps.append(VRasterStep(new, "multiply"))
+        return new_vraster
 
     @property
     def crs(self) -> CRS:
@@ -73,11 +99,13 @@ class VRaster:
     def transform(self) -> Affine:
         return self.last.transform
 
+    @property
     def bounds(self) -> BoundingBox:
-        return BoundingBox(*rio.transform.array_bounds(*self.shape, self.transform))
+        return self.last.bounds
 
+    @property
     def res(self):
-        return self.last.res()
+        return self.last.res
 
     def copy(self):
         return copy.deepcopy(self)

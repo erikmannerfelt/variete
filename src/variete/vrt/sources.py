@@ -15,9 +15,8 @@ class SourceProperties:
     block_size: tuple[int, int]
 
     def __init__(self, shape: tuple[int, int], dtype: str, block_size: tuple[int, int]):
-        self.shape = shape
-        self.dtype = dtype
-        self.block_size = block_size
+        for attr in ["shape", "dtype", "block_size"]:
+            setattr(self, attr, locals()[attr])
 
     def __repr__(self):
         return f"SourceProperties: shape: {self.shape}, dtype: {self.dtype}, block_size: {self.block_size}"
@@ -52,10 +51,8 @@ class Window:
     y_size: float
 
     def __init__(self, x_off: float, y_off: float, x_size: float, y_size: float):
-        self.x_off = x_off
-        self.y_off = y_off
-        self.x_size = x_size
-        self.y_size = y_size
+        for attr in ["x_off", "y_off", "x_size", "y_size"]:
+            setattr(self, attr, locals()[attr])
 
     def __repr__(self):
         return f"Window: x_off: {self.x_off}, y_off: {self.y_off}, x_size: {self.x_size}, y_size: {self.y_size}"
@@ -135,17 +132,7 @@ class ComplexSource:
         )
 
     def copy(self):
-        return copy.copy(self)
-
-        # return type(self)(
-        #     source_filename=self.source_filename,
-        #     source_band=self.source_band,
-        #     source_properties=copy.copy(self.source_propertes),
-        #     nodata=self.nodata,
-        #     src_window=copy.copy(self.src_window),
-
-        # )
-
+        return copy.deepcopy(self)
 
     def to_etree(self):
         source_xml = ET.Element(self.source_kind)
@@ -250,14 +237,11 @@ class SimpleSource(ComplexSource):
         else:
             self.relative_filename = relative_filename
 
-        self.source_filename = source_filename
-        self.source_band = source_band
-        self.src_window = src_window
-        self.dst_window = dst_window
+        for attr in ["source_filename", "source_band", "src_window", "dst_window"]:
+            setattr(self, attr, locals()[attr])
 
-        self.nodata = None
+        self.nodata = self.source_properties = None
         self.source_kind = "SimpleSource"
-        self.source_properties = None
 
 
 Source = ComplexSource | SimpleSource

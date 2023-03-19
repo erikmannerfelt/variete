@@ -12,7 +12,6 @@ import warnings
 from variete.vrt.raster_bands import AnyRasterBand, WarpedVRTRasterBand, raster_band_from_etree
 from variete import misc
 import copy
-from contextlib import contextmanager, ExitStack
 from tempfile import TemporaryDirectory
 import hashlib
 import numpy as np
@@ -103,6 +102,7 @@ def build_warped_vrt(
     del dataset
     del vrt_dataset
 
+
 class VRTDataset:
     shape: tuple[int, int]
     crs: CRS
@@ -121,14 +121,10 @@ class VRTDataset:
         crs_mapping: str = "2,1",
     ):
 
-        self.shape = shape
-        self.crs = crs
-        self.crs_mapping = crs_mapping
-        self.transform = transform
-        self.raster_bands = raster_bands
-        self.subclass = None
-        # self.block_size = None
-        self.warp_options = None
+        for attr in ["shape", "crs", "crs_mapping", "transform", "raster_bands"]:
+            setattr(self, attr, locals()[attr])
+
+        self.subclass = self.warp_options = None
 
     def __repr__(self):
         return "\n".join(
@@ -136,9 +132,11 @@ class VRTDataset:
             + ["\t" + "\n\t".join(band.__repr__().splitlines()) for band in self.raster_bands]
         )
 
+    @property
     def bounds(self) -> rio.coords.BoundingBox:
         return rio.coords.BoundingBox(*rio.transform.array_bounds(*self.shape, self.transform))
 
+    @property
     def res(self) -> tuple[float, float]:
         """
         Return the X/Y resolution of the dataset.
@@ -219,7 +217,7 @@ class VRTDataset:
                 if hasattr(source.source_filename, "to_tempfiles"):
                     return True
         return False
-    
+
     def to_tempfiles(self, temp_dir: TemporaryDirectory | str | Path | None = None) -> tuple[TemporaryDirectory, Path]:
 
         if temp_dir is None:
@@ -240,16 +238,17 @@ class VRTDataset:
         vrt.save_vrt(filepath)
 
         return temp_dir, filepath
-                    
 
     def to_memfile(self) -> rio.MemoryFile:
         if self.is_nested():
             raise ValueError("Nested VRTs require temporary saving to work (see to_memfile_nested")
         return rio.MemoryFile(self.to_xml().encode(), ext=".vrt")
 
-    def to_memfile_nested(self, temp_dir: TemporaryDirectory | str | Path | None) -> tuple[TemporaryDirectory, rio.MemoryFile]:
+    def to_memfile_nested(
+        self, temp_dir: TemporaryDirectory | str | Path | None
+    ) -> tuple[TemporaryDirectory, rio.MemoryFile]:
         if not self.is_nested():
-            return (temp_dir, self.to_memfile())  
+            return (temp_dir, self.to_memfile())
 
         if temp_dir is None:
             temp_dir = TemporaryDirectory(prefix="variete")
@@ -265,7 +264,9 @@ class VRTDataset:
             raise ValueError("Nested VRTs require temporary saving to work (see open_rio_nested")
         return self.to_memfile().open
 
-    def open_rio_nested(self, temp_dir: TemporaryDirectory | str | Path | None = None) -> tuple[TemporaryDirectory, Callable[None, rio.DatasetReader]]:
+    def open_rio_nested(
+        self, temp_dir: TemporaryDirectory | str | Path | None = None
+    ) -> tuple[TemporaryDirectory, Callable[None, rio.DatasetReader]]:
         if not self.is_nested():
             return (temp_dir, self.open_rio)
 
@@ -279,7 +280,11 @@ class VRTDataset:
             x_coord = [x_coord]
             y_coord = [y_coord]
         with self.open_rio() as raster:
-            values = np.fromiter(raster.sample(zip(x_coord, y_coord), indexes=band, masked=masked), dtype=self.raster_bands[band - 1].dtype, count=len(x_coord)).ravel()
+            values = np.fromiter(
+                raster.sample(zip(x_coord, y_coord), indexes=band, masked=masked),
+                dtype=self.raster_bands[band - 1].dtype,
+                count=len(x_coord),
+            ).ravel()
             if values.size > 1:
                 return values
             return values[0]
@@ -328,24 +333,8 @@ class WarpedVRTDataset(VRTDataset):
         approximate: bool = True,
         warp_memory_limit: float = 6.71089e07,
     ):
-
         if crs_mapping is None:
             crs_mapping = "2,1"
-
-        self.shape = shape
-        self.crs = crs
-        self.transform = transform
-        self.raster_bands = raster_bands
-        self.resample_algorithm = resample_algorithm
-        self.block_size = block_size
-        self.dst_dtype = dst_dtype
-        self.options = options
-        self.source_dataset = source_dataset
-        self.band_mapping = band_mapping
-        self.src_transform = src_transform
-        self.src_inv_transform = src_inv_transform
-        self.dst_transform = dst_transform
-        self.dst_inv_transform = dst_inv_transform
 
         if relative_filename is None:
             if isinstance(source_dataset, Path):
@@ -355,10 +344,13 @@ class WarpedVRTDataset(VRTDataset):
         else:
             self.relative_filename = relative_filename
 
-        self.max_error = max_error
-        self.approximate = approximate
-        self.warp_memory_limit = warp_memory_limit
-        self.crs_mapping = crs_mapping
+        attrs = (
+            ["shape", "crs", "transform", "raster_bands", "resample_algorithm", "block_size", "dst_dtype"]
+            + ["options", "source_dataset", "band_mapping", "src_transform", "src_inv_transform", "dst_transform"]
+            + ["dst_inv_transform", "crs_mapping", "warp_memory_limit", "max_error", "approximate"]
+        )
+        for attr in attrs:
+            setattr(self, attr, locals()[attr])
 
     @classmethod
     def from_etree(cls, root: ET.Element):
@@ -458,7 +450,9 @@ class WarpedVRTDataset(VRTDataset):
             warp.append(misc.new_element("Option", self.options[key], {"name": key}))
 
         warp.append(
-            misc.new_element("SourceDataset", str(self.source_dataset), {"relativeToVRT": str(int(self.relative_filename))})
+            misc.new_element(
+                "SourceDataset", str(self.source_dataset), {"relativeToVRT": str(int(self.relative_filename))}
+            )
         )
 
         transformer = ET.SubElement(ET.SubElement(warp, "Transformer"), "ApproxTransformer")
@@ -530,7 +524,7 @@ def main():
     filepath = Path("Marma_DEM_2021.tif")
     vrt_path = Path("stack.vrt")
 
-    #pixel_function = SumPixelFunction(5)
+    # pixel_function = SumPixelFunction(5)
 
 
 if __name__ == "__main__":

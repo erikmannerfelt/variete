@@ -23,13 +23,8 @@ class VRTRasterBand:
         offset: int | float | None = None,
         scale: int | float | None = None,
     ):
-        self.dtype = dtype
-        self.band = band
-        self.nodata = nodata
-        self.color_interp = color_interp
-        self.sources = sources
-        self.scale = scale
-        self.offset = offset
+        for attr in ["dtype", "band", "nodata", "color_interp", "sources", "scale", "offset"]:
+            setattr(self, attr, locals()[attr])
 
     def __repr__(self):
         return "\n".join(
@@ -86,10 +81,8 @@ class WarpedVRTRasterBand(VRTRasterBand):
     nodata: float | int | None
 
     def __init__(self, dtype: str, band: int, color_interp: str, nodata: float | int | None = None):
-        self.dtype = dtype
-        self.band = band
-        self.color_interp = color_interp
-        self.nodata = nodata
+        for attr in ["dtype", "band", "nodata", "color_interp"]:
+            setattr(self, attr, locals()[attr])
 
     def __repr__(self):
         return f"WarpedVRTRasterBand: dtype: {self.dtype}, band: {self.band}, nodata: {self.nodata}, color_interp: {self.color_interp}"
@@ -141,14 +134,8 @@ class VRTDerivedRasterBand(VRTRasterBand):
         offset: int | float | None = None,
         scale: int | float | None = None,
     ):
-        self.dtype = dtype
-        self.band = band
-        self.nodata = nodata
-        self.color_interp = color_interp
-        self.sources = sources
-        self.pixel_function = pixel_function
-        self.offset = offset
-        self.scale = scale
+        for attr in ["dtype", "band", "nodata", "color_interp", "sources", "scale", "offset", "pixel_function"]:
+            setattr(self, attr, locals()[attr])
 
     @classmethod
     def from_etree(cls, elem: ET.Element):

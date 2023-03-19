@@ -304,7 +304,7 @@ def test_sample():
         vrt = variete.vrt.VRTDataset.from_file(test_raster_path)
 
         
-        left, upper = vrt.transform.c + vrt.res()[0] / 2, vrt.transform.f - vrt.res()[1] / 2
+        left, upper = vrt.transform.c + vrt.res[0] / 2, vrt.transform.f - vrt.res[1] / 2
 
         sampled = vrt.sample(left, upper)
 
