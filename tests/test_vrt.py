@@ -1,10 +1,10 @@
 import variete.vrt
+from variete.vrt import raster_bands, pixel_functions
 import tempfile
 from pathlib import Path 
 import rasterio as rio
 import rasterio.warp
 import numpy as np
-from osgeo import gdal
 import warnings
 
 
@@ -187,7 +187,7 @@ def test_set_offset_scale():
         vrt.raster_bands[0].offset = offset
         vrt.raster_bands[0].scale = scale
 
-        vrt.raster_bands[0] = variete.vrt.VRTDerivedRasterBand.from_raster_band(vrt.raster_bands[0], variete.vrt.ScalePixelFunction()) 
+        vrt.raster_bands[0] = raster_bands.VRTDerivedRasterBand.from_raster_band(vrt.raster_bands[0], pixel_functions.ScalePixelFunction()) 
 
         print(vrt.to_xml())
 
@@ -208,9 +208,9 @@ def test_pixel_function():
         vrt = variete.vrt.VRTDataset.from_file(test_raster_path)
 
         constant = 5
-        add_function = variete.vrt.SumPixelFunction(constant)
+        add_function = pixel_functions.SumPixelFunction(constant)
 
-        vrt.raster_bands[0] = variete.vrt.VRTDerivedRasterBand.from_raster_band(vrt.raster_bands[0], add_function)
+        vrt.raster_bands[0] = raster_bands.VRTDerivedRasterBand.from_raster_band(vrt.raster_bands[0], add_function)
 
         vrt.raster_bands[0].sources.append(vrt.raster_bands[0].sources[0].copy())
 
