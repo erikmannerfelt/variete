@@ -3,13 +3,13 @@ from pathlib import Path
 import rasterio as rio
 from affine import Affine
 import xml.etree.ElementTree as ET
-from typing import Literal
+from typing import Literal, Callable
 import tempfile
 from osgeo import gdal
 from rasterio.coords import BoundingBox
 from rasterio.warp import Resampling
 import warnings
-import pyproj
+import copy
 
 
 def get_resampling_gdal_to_numpy():
@@ -292,6 +292,19 @@ class ComplexSource:
             ]
         )
 
+    def copy(self):
+        return copy.copy(self)
+
+        # return type(self)(
+        #     source_filename=self.source_filename,
+        #     source_band=self.source_band,
+        #     source_properties=copy.copy(self.source_propertes),
+        #     nodata=self.nodata,
+        #     src_window=copy.copy(self.src_window),
+
+        # )
+
+
     def to_etree(self):
         source_xml = ET.Element(self.source_kind)
 
@@ -355,20 +368,22 @@ class ComplexSource:
 class SimpleSource(ComplexSource):
     source_filename: Path | str
     source_band: int
-    source_properties: SourceProperties | None
-    nodata: int | float | None
-    src_window: Window
-    dst_window: Window
+    source_properties: None
+    nodata: None
+    src_window: None
+    dst_window: None
     relative_filename: bool | None
-    source_kind: str
 
     def __init__(
         self,
         source_filename: Path | str,
-        source_band: int,
-        src_window: Window,
-        dst_window: Window,
-        relative_filename: bool | None = None,
+        source_band: int | None = None,
+        src_window: None = None,
+        dst_window: None = None,
+        relative_filename: None = None,
+        source_properties: None = None,
+        nodata: None = None,
+        source_kind: None = None,
     ):
         if relative_filename is None:
             if isinstance(source_filename, Path):
@@ -405,6 +420,8 @@ class VRTRasterBand:
     nodata: int | float | None
     color_interp: str
     sources: list[ComplexSource | SimpleSource]
+    offset: int | float | None
+    scale: int | float | None
 
     def __init__(
         self,
@@ -413,12 +430,16 @@ class VRTRasterBand:
         nodata: int | float | None,
         color_interp: str,
         sources: list[ComplexSource | SimpleSource],
+        offset: int | float | None = None,
+        scale: int | float | None = None,
     ):
         self.dtype = dtype
         self.band = band
         self.nodata = nodata
         self.color_interp = color_interp
         self.sources = sources
+        self.scale = scale
+        self.offset = offset
 
     def __repr__(self):
         return "\n".join(
@@ -431,8 +452,9 @@ class VRTRasterBand:
     def to_etree(self):
         band_xml = ET.Element("VRTRasterBand", {"dataType": self.dtype.capitalize(), "band": str(self.band)})
 
-        nodata_xml = ET.SubElement(band_xml, "NoDataValue")
-        nodata_xml.text = str(int(self.nodata) if self.nodata.is_integer() else self.nodata)
+        for key, gdal_key in [("nodata", "NoDataValue"), ("offset", "Offset"), ("scale", "Scale")]:
+            if (value := getattr(self, key)) is not None:
+                band_xml.append(new_element(gdal_key, number_to_gdal(value)))
 
         color_interp_xml = ET.SubElement(band_xml, "ColorInterp")
         color_interp_xml.text = self.color_interp.capitalize()
@@ -444,13 +466,17 @@ class VRTRasterBand:
 
     @classmethod
     def from_etree(cls, elem: ET.Element):
-        dtype = elem.get("dataType").lower()
+        dtype = dtype_gdal_to_numpy(elem.get("dataType"))
         band = int(elem.get("band"))
 
-        if (sub_elem := elem.find("NoDataValue")) is not None:
-            nodata = float(sub_elem.text)
-        else:
-            nodata = None
+
+        scalars = {}
+        for key, gdal_key in [("nodata", "NoDataValue"), ("offset", "Offset"), ("scale", "Scale")]:
+            if (sub_elem := elem.find(gdal_key)) is not None:
+                scalars[key] = float(sub_elem.text)
+            else:
+                scalars[key] = None
+
 
         color_interp = getattr(elem.find("ColorInterp"), "text", "undefined")
 
@@ -460,7 +486,7 @@ class VRTRasterBand:
                 continue
             sources.append(source_from_etree(source))
 
-        return cls(dtype=dtype, band=band, nodata=nodata, color_interp=color_interp, sources=sources)
+        return cls(dtype=dtype, band=band, color_interp=color_interp, sources=sources, **scalars)
 
 
 class WarpedVRTRasterBand(VRTRasterBand):
@@ -513,16 +539,99 @@ class WarpedVRTRasterBand(VRTRasterBand):
         return band
 
 
+class PixelFunction:
+    name: str
+    arguments: dict[str, str] | None
+    code: str | None
+    language: Literal["Python"] | None
+
+    def __init__(
+        self,
+        name: str,
+        arguments: dict[str, str] | None = None,
+        code: str | None = None,
+        language: Literal["Python"] | None = None,
+    ):
+        self.name = name
+        self.arguments = arguments
+        self.code = code
+        self.language = language
+
+    def validate(self, n_bands: int):
+        assert len(self.name) > 0, "The PixelFunction must have a name"
+        assert self.language is None or self.language == "Python", "PixelFunction language must be None or 'Python'"
+
+        assert n_bands > 0, "PixelFunction requires at least one band"
+
+        if self.code is not None and self.language is None:
+            raise AssertionError("PixelFunction code is given but the language is not provided")
+
+    def to_etree_keys(self) -> list[ET.Element]:
+
+        keys = []
+
+        keys.append(new_element("PixelFunctionType", self.name))
+        keys.append(new_element("PixelFunctionArguments", None, self.arguments))
+
+        if self.language is not None:
+            keys.append(new_element("PixelFunctionLanguage", self.language))
+
+        if self.code is not None:
+            keys.append(new_element("PixelFunctionCode", self.code))
+
+        return keys
+
+
+class SumPixelFunction(PixelFunction):
+    def __init__(self, constant: int | float | None = None):
+        self.name = "sum"
+        self.arguments = {"k": number_to_gdal(constant)} if constant is not None else None
+        self.code = self.language = None
+
+    def validate(self, n_bands: int):
+        PixelFunction.validate(self, n_bands=n_bands)
+
+        if "k" in (self.arguments or {}):
+            n_bands += 1
+
+        if n_bands < 2:
+            raise ValueError("SumPixelFunction requires at least two bands (or one band and a constant")
+
+class ScalePixelFunction(PixelFunction):
+    def __init__(self):
+        self.name = "scale"
+        self.arguments = self.code = self.language = None
+
+
+AnyPixelFunction = PixelFunction | SumPixelFunction | ScalePixelFunction
+
+
+def pixel_function_from_etree(elem: ET.Element) -> AnyPixelFunction:
+
+    if (pixel_function_type_elem := elem.find("PixelFunctionType")) is not None:
+        name = pixel_function_type_elem.text
+    else:
+        raise ValueError("Key PixelFunctionType does not exist. Invalid PixelFunction")
+
+    language = getattr(elem.find("PixelFunctionLanguage"), "text", None)
+
+    if (arguments_elem := elem.find("PixelFunctionArguments")) is not None:
+        arguments = dict(arguments_elem.items())
+    else:
+        arguments = None
+
+    code = getattr(elem.find("PixelFunctionCode"), "text", None)
+
+    if code is None:
+        if name == "sum":
+            return SumPixelFunction(arguments["k"])
+        raise ValueError(f"Empty PixelFunctionCode and unknown type: {name}")
+
+    return PixelFunction(name=name, arguments=arguments, code=code, language=language)
+
+
 class VRTDerivedRasterBand(VRTRasterBand):
-    dtype: str
-    band: int
-    nodata: int | float | None
-    color_interp: str
-    sources: list[ComplexSource | SimpleSource]
-    pixel_function: str
-    pixel_function_arguments: dict[str, str] | None
-    pixel_function_code: str | None
-    pixel_function_language: Literal["Python"] | None
+    pixel_function: AnyPixelFunction
 
     def __init__(
         self,
@@ -531,10 +640,9 @@ class VRTDerivedRasterBand(VRTRasterBand):
         nodata: int | float | None,
         color_interp: str,
         sources: list[ComplexSource | SimpleSource],
-        pixel_function: str,
-        pixel_function_arguments: dict[str, str] | None = None,
-        pixel_function_code: str | None = None,
-        pixel_function_language: Literal["Python"] | None = None
+        pixel_function: AnyPixelFunction,
+        offset: int | float | None = None,
+        scale: int | float | None = None,
     ):
         self.dtype = dtype
         self.band = band
@@ -542,12 +650,8 @@ class VRTDerivedRasterBand(VRTRasterBand):
         self.color_interp = color_interp
         self.sources = sources
         self.pixel_function = pixel_function
-        self.pixel_function_arguments = pixel_function_arguments
-        self.pixel_function_code = pixel_function_code
-
-        if pixel_function_language is not None and pixel_function_language != "Python":
-            raise ValueError("The pixel function language has to the 'Python' or None")
-        self.pixel_function_language = pixel_function_language
+        self.offset = offset
+        self.scale = scale
 
     @classmethod
     def from_etree(cls, elem: ET.Element):
@@ -556,16 +660,7 @@ class VRTDerivedRasterBand(VRTRasterBand):
 
         base = VRTRasterBand.from_etree(elem)
 
-        pixel_function = elem.find("PixelFunctionType").text
-
-        pixel_function_language = getattr(elem.find("PixelFunctionLanguage"), "text", None)
-
-        if (sub_elem := elem.find("PixelFunctionArguments")) is not None:
-            pixel_function_arguments = dict(sub_elem.items())
-        else:
-            pixel_function_arguments = None
-
-        pixel_function_code = getattr(elem.find("PixelFunctionCode"), "text", None)
+        pixel_function = pixel_function_from_etree(elem)
 
         return cls(
             dtype=base.dtype,
@@ -574,13 +669,32 @@ class VRTDerivedRasterBand(VRTRasterBand):
             color_interp=base.color_interp,
             sources=base.sources,
             pixel_function=pixel_function,
-            pixel_function_arguments=pixel_function_arguments,
-            pixel_function_code=pixel_function_code,
-            pixel_function_language=pixel_function_language,
+            offset=base.offset,
+            scale=base.scale,
+            
+        )
+
+    @classmethod
+    def from_raster_band(cls, band: VRTRasterBand, pixel_function: AnyPixelFunction):
+        return cls(
+            dtype=band.dtype,
+            band=band.band,
+            nodata=band.nodata,
+            color_interp=band.color_interp,
+            sources=band.sources,
+            pixel_function=pixel_function,
+            offset=band.offset,
+            scale=band.scale
         )
 
     def to_etree(self):
-        raise NotImplementedError()
+        base = VRTRasterBand.to_etree(self)
+        base.set("subClass", "VRTDerivedRasterBand")
+
+        for sub_elem in self.pixel_function.to_etree_keys():
+            base.append(sub_elem)
+
+        return base
 
 
 def raster_band_from_etree(elem: ET.Element):
@@ -590,16 +704,14 @@ def raster_band_from_etree(elem: ET.Element):
 
     subclass = elem.get("subClass")
 
-    if subclass is None:
-        return VRTRasterBand.from_etree(elem)
-
     if subclass == "VRTWarpedRasterBand":
         return WarpedVRTRasterBand.from_etree(elem)
 
     if subclass == "VRTDerivedRasterBand":
         return VRTDerivedRasterBand.from_etree(elem)
 
-    warnings.warn(f"Unknown VRTRasterBand class: '{subclass}'. Trying to treat as a classless VRTRasterBand")
+    if subclass is not None:
+        warnings.warn(f"Unknown VRTRasterBand class: '{subclass}'. Trying to treat as a classless VRTRasterBand")
     return VRTRasterBand.from_etree(elem)
 
 
@@ -648,11 +760,8 @@ class VRTDataset:
     def to_etree(self):
         vrt = ET.Element("VRTDataset", {"rasterXSize": str(self.shape[1]), "rasterYSize": str(self.shape[0])})
 
-        # if self.subclass is not None:
-        #    vrt.set("subClass", self.subclass)
-
         crs = ET.SubElement(vrt, "SRS", {"dataAxisToSRSAxisMapping": self.crs_mapping})
-        crs.text = self.crs.to_wkt()
+        crs.text = f"EPSG:{self.crs.to_epsg()}"
 
         transform = ET.SubElement(vrt, "GeoTransform")
         transform.text = transform_to_gdal(self.transform)
@@ -699,7 +808,6 @@ class VRTDataset:
             return cls.from_xml(infile.read())
 
     def save_vrt(self, filepath: Path) -> None:
-
         with open(filepath, "w") as outfile:
             outfile.write(self.to_xml())
 
@@ -710,6 +818,13 @@ class VRTDataset:
 
             build_vrt(output_filepath=temp_vrt, filepaths=filepaths, **kwargs)
             return cls.load_vrt(temp_vrt)
+
+    def to_memfile(self) -> rio.MemoryFile:
+        return rio.MemoryFile(self.to_xml().encode(), ext=".vrt")
+
+    @property
+    def open_rio(self) -> Callable[None, rio.DatasetReader]:
+        return self.to_memfile().open
 
 
 class WarpedVRTDataset(VRTDataset):
@@ -857,7 +972,7 @@ class WarpedVRTDataset(VRTDataset):
         )
 
         crs = ET.SubElement(vrt, "SRS", {"dataAxisToSRSAxisMapping": self.crs_mapping})
-        crs.text = self.crs.to_wkt()
+        crs.text = f"EPSG:{self.crs.to_epsg()}"
 
         transform = ET.SubElement(vrt, "GeoTransform")
         transform.text = transform_to_gdal(self.transform)
@@ -926,7 +1041,6 @@ class WarpedVRTDataset(VRTDataset):
         return vrt
 
 
-
 def transform_to_gdal(transform: Affine) -> str:
     return ", ".join(map(number_to_gdal, transform.to_gdal()))
 
@@ -935,39 +1049,35 @@ def parse_gdal_transform(string: str) -> Affine:
     return Affine.from_gdal(*map(float, string.split(",")))
 
 
+def dataset_from_etree(elem: ET.Element) -> VRTDataset | WarpedVRTDataset:
+
+    if elem.tag != "VRTDataset":
+        raise ValueError(f"Invalid root tag for VRT: {elem.tag}")
+
+    subclass = elem.get("subClass")
+
+    if subclass == "VRTWarpedDataset":
+        return WarpedVRTDataset.from_etree(elem)
+
+    if subclass is not None:
+        warnings.warn(f"Unexpected subClass tag: {subclass}. Ignoring it")
+
+    return VRTDataset.from_etree(elem)
+
+
+def load_vrt(filepath: str | Path) -> VRTDataset | WarpedVRTDataset:
+    with open(filepath) as infile:
+        root = ET.fromstring(infile.read())
+
+    return dataset_from_etree(root)
+
+
 def main():
 
-    # raster = Raster.from_filepath("Marma_DEM_2021.tif")
-    # raster = VRTDataset.from_xml("stack.vrt")
-    # _raster = VRTDataset.from_dataset(Path("Marma_DEM_2008.tif").absolute())
+    filepath = Path("Marma_DEM_2021.tif")
+    vrt_path = Path("stack.vrt")
 
-    # raster2 = VRTDataset.from_multiple_datasets(["Marma_DEM_2008.tif", "Marma_DEM_2021.tif"], separate=True)
-
-    # raster.save_vrt("hello.vrt")
-
-    # print(raster2)
-
-    # raster = WarpedVRTDataset.load_vrt("example_data/warped_vrt.vrt")
-
-    # raster = WarpedVRTDataset.from_file("Marma_DEM_2008.tif", dst_crs=32633)
-    #raster = VRTDataset.load_vrt("example_data/derived_vrt_python.vrt")
-    raster = WarpedVRTDataset.from_file("Marma_DEM_2021.tif", 32633)
-
-    #raster.raster_bands[0].nodata = -9999
-
-    raster.save_vrt("warp.vrt")
-
-
-    print(raster.to_xml())
-
-    # raster.save_vrt("warped.vrt")
-    # print(raster.to_xml())
-
-    # vrt = ET.Element("VRTDataset", {"rasterXSize": str(raster.shape[1]), "rasterYsize": str(raster.shape[0]) })
-
-    # print(raster.to_vrt_xml())
-    # print(ET.tostring(vrt))
-    # print(raster.to_vrt())
+    pixel_function = SumPixelFunction(5)
 
 
 if __name__ == "__main__":

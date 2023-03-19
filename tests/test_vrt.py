@@ -1,14 +1,14 @@
-import variete.vrt as vrtraster
-from variete import vrt
+import variete.vrt
 import tempfile
 from pathlib import Path 
 import rasterio as rio
 import rasterio.warp
 import numpy as np
 from osgeo import gdal
+import warnings
 
 
-def make_test_raster(filepath: Path):
+def make_test_raster(filepath: Path, nodata: float = -9999., mean_val: int | float | None = None):
     crs = rio.crs.CRS.from_epsg(32633)
     transform = rio.transform.from_origin(5e5, 8.7e6, 10, 10) 
 
@@ -17,7 +17,10 @@ def make_test_raster(filepath: Path):
         np.sin(np.linspace(0, np.pi / 2, 50)) * 10,
     ))
 
-    with rio.open(filepath, "w", "GTiff", width=data.shape[1], dtype="float32", height=data.shape[0], count=1, crs=crs, transform=transform, nodata=-9999) as raster:
+    if mean_val is not None:
+        data += mean_val
+
+    with rio.open(filepath, "w", "GTiff", width=data.shape[1], dtype="float32", height=data.shape[0], count=1, crs=crs, transform=transform, nodata=nodata) as raster:
         raster.write(data, 1)
 
     return {"crs": crs, "transform": transform, "data": data}
@@ -28,7 +31,7 @@ def test_create_vrt():
         test_raster = Path(temp_dir).joinpath("test.tif")
         raster = make_test_raster(test_raster)
 
-        vrt = vrtraster.VRTDataset.from_file(test_raster)
+        vrt = variete.vrt.VRTDataset.from_file(test_raster)
 
         assert vrt.transform == raster["transform"]
         assert vrt.crs == raster["crs"]
@@ -38,7 +41,7 @@ def test_create_vrt():
 
         vrt.save_vrt(vrt_path)
 
-        vrt_loaded = vrtraster.VRTDataset.load_vrt(vrt_path)
+        vrt_loaded = variete.vrt.VRTDataset.load_vrt(vrt_path)
 
         assert vrt.crs == vrt_loaded.crs
 
@@ -90,7 +93,7 @@ def test_multiple_vrt():
         #raise NotImplementedError()
         
             
-        vrt_mosaic = vrtraster.VRTDataset.from_file(test_raster_paths, separate=False)
+        vrt_mosaic = variete.vrt.VRTDataset.from_file(test_raster_paths, separate=False)
 
         assert vrt_mosaic.crs == rasters[0]["crs"]
         assert vrt_mosaic.transform == rasters[0]["transform"]
@@ -102,7 +105,7 @@ def test_multiple_vrt():
         for i, source in enumerate(vrt_mosaic.raster_bands[0].sources):
             assert source.source_filename == test_raster_paths[i]
 
-        vrt_separate = vrtraster.VRTDataset.from_file(test_raster_paths, separate=True)
+        vrt_separate = variete.vrt.VRTDataset.from_file(test_raster_paths, separate=True)
 
         assert vrt_separate.crs == rasters[0]["crs"]
         assert vrt_separate.transform == rasters[0]["transform"]
@@ -116,7 +119,7 @@ def test_warped_vrt():
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         make_test_raster(test_raster_path)
 
-        warped = vrt.WarpedVRTDataset.from_file(test_raster_path, dst_crs=32634)
+        warped = variete.vrt.WarpedVRTDataset.from_file(test_raster_path, dst_crs=32634)
         vrt_path = test_raster_path.with_suffix(".vrt")
         warped.save_vrt(vrt_path)
 
@@ -125,6 +128,100 @@ def test_warped_vrt():
             assert raster.nodata == -9999
         
 
+def create_vrt():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        raster = make_test_raster(test_raster_path)
+
+        vrt = variete.vrt.VRTDataset.from_file(test_raster_path)
+
+    return raster, vrt
+
+
+def test_with_open():
+
+    raster_params, vrt = create_vrt()
+
+    with vrt.open_rio() as raster:
+        assert raster.crs == raster_params["crs"]
+        assert raster.transform == raster_params["transform"]
+   
+
+def test_load_vrt():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        make_test_raster(test_raster_path)
+
+        vrt_path = test_raster_path.with_suffix(".vrt")
+
+        vrt = variete.vrt.VRTDataset.from_file(test_raster_path)
+        vrt.save_vrt(vrt_path)
+
+        vrt_warp_path = vrt_path.with_stem("warped")
+        vrt_warp = variete.vrt.WarpedVRTDataset.from_file(vrt_path, dst_crs=vrt.crs.to_epsg() + 1)
+        vrt_warp.save_vrt(vrt_warp_path)
+
+        loaded_vrt = variete.vrt.load_vrt(vrt_path)
+        loaded_warp_vrt = variete.vrt.load_vrt(vrt_warp_path)
+
+        assert type(loaded_vrt) == variete.vrt.VRTDataset
+        assert type(loaded_warp_vrt) == variete.vrt.WarpedVRTDataset
+        assert type(loaded_warp_vrt) != variete.vrt.VRTDataset
+
+        for [vrt0, vrt1] in [(vrt, loaded_vrt), (vrt_warp, loaded_warp_vrt)]:
+            assert vrt0.crs == vrt1.crs
+            assert vrt0.transform == vrt1.transform
+
+
+def test_set_offset_scale():
+    warnings.simplefilter("error")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        raster_params = make_test_raster(test_raster_path, nodata=None, mean_val=5)
+
+        #vrt_path = test_raster_path.with_suffix(".vrt")
+        vrt = variete.vrt.VRTDataset.from_file(test_raster_path)
+
+        offset = 2
+        scale = 3
+        vrt.raster_bands[0].offset = offset
+        vrt.raster_bands[0].scale = scale
+
+        vrt.raster_bands[0] = variete.vrt.VRTDerivedRasterBand.from_raster_band(vrt.raster_bands[0], variete.vrt.ScalePixelFunction()) 
+
+        print(vrt.to_xml())
+
+        with vrt.open_rio() as raster:
+            loaded_raster = raster.read(1)
+
+        assert np.sum((scale * raster_params["data"]) + offset) == np.sum(loaded_raster)
+
+
+def test_pixel_function():
+    warnings.simplefilter("error")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        raster_params = make_test_raster(test_raster_path, nodata=None, mean_val=5)
+
+        #vrt_path = test_raster_path.with_suffix(".vrt")
+        vrt = variete.vrt.VRTDataset.from_file(test_raster_path)
+
+        constant = 5
+        add_function = variete.vrt.SumPixelFunction(constant)
+
+        vrt.raster_bands[0] = variete.vrt.VRTDerivedRasterBand.from_raster_band(vrt.raster_bands[0], add_function)
+
+        vrt.raster_bands[0].sources.append(vrt.raster_bands[0].sources[0].copy())
+
+        with vrt.open_rio() as raster:
+            added_raster = raster.read(1)
+
+        assert np.round(np.nanmean((added_raster - constant) / raster_params["data"]), 4) == 2.0
+            
+
+        
+        
 
     
   
@@ -134,8 +231,4 @@ def test_main():
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster = Path(temp_dir).joinpath("test.tif")
         make_test_raster(test_raster)
-        print(test_raster)
     
-    print(vrtraster)
-
-    ...
