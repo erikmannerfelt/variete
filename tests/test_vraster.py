@@ -1,3 +1,4 @@
+import variete
 from variete.vraster import VRaster
 import tempfile
 from pathlib import Path
@@ -18,7 +19,6 @@ def _print_nested(vraster: VRaster):
 
             print("\n")
 
-
 def test_load_vraster():
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
@@ -29,6 +29,28 @@ def test_load_vraster():
         assert vrst.crs == raster_params["crs"]
         assert vrst.transform == raster_params["transform"]
         assert vrst.shape == raster_params["data"].shape
+
+        
+        vrst2 = variete.load(test_raster_path, nodata_to_nan=True)
+        assert vrst2.steps[-1].name == "replace_nodata"
+
+        vrst3 = variete.load(test_raster_path, nodata_to_nan=False)
+        assert vrst3.steps[-1].name == vrst2.steps[-2].name
+
+
+def test_vraster_read():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        raster_params = make_test_raster(test_raster_path)
+
+        vrst = VRaster.load_file(test_raster_path)
+
+        assert np.array_equal(vrst.read(1), raster_params["data"])
+        assert np.array_equal(vrst.read(), raster_params["data"].reshape((1,) + raster_params["data"].shape))
+
+        assert not hasattr(vrst.read(), "mask")
+
+        assert hasattr(vrst.read(masked=True), "mask")
 
 
 def test_constant_add_subtract():
@@ -263,3 +285,39 @@ def test_replace_nodata():
 
             assert vrst.sample_rowcol(25, 25) == expected_mid
 
+
+def test_overloading():
+
+    two_arr = np.ones((50, 100), dtype="float32") + 1
+    four_arr = two_arr.copy() + 2
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        make_test_raster(test_raster_path_a, assign_values=two_arr)
+
+        test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
+        make_test_raster(test_raster_path_b, assign_values=four_arr)
+
+        two = VRaster.load_file(test_raster_path_a)
+        four = VRaster.load_file(test_raster_path_b)
+
+        one = two / 2
+        five = four + 1
+
+        tests = [
+            (two + four, 6.),
+            (four - one, 3.),
+            (four / two, 2.),
+            (four * two, 8.),
+            (four + 1, 5.),
+            (five - 1, 4.),
+            (four / 4, 1.),
+            (five * 5, 25.),
+            (1 + four, 5.),
+            (6 - four, 2.),
+            (8 * one, 8.),
+            (4 / four, 1.),
+        ]
+
+        for i, (vrst, expected) in enumerate(tests):
+            assert vrst.sample_rowcol(0, 0) == expected, f"test {i} failed"

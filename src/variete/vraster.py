@@ -6,6 +6,9 @@ import rasterio as rio
 from rasterio.coords import BoundingBox
 from rasterio.transform import Affine
 from rasterio.crs import CRS
+from rasterio.windows import Window
+import numpy as np
+from typing import overload, Literal
 
 from variete.vrt.vrt import VRTDataset, AnyVRTDataset, load_vrt
 from variete.vrt.raster_bands import VRTDerivedRasterBand
@@ -14,6 +17,7 @@ from variete.vrt import pixel_functions
 from variete.vrt.sources import SimpleSource
 from variete import misc
 
+
 class VRasterStep:
     dataset: AnyVRTDataset
     name: str
@@ -21,7 +25,7 @@ class VRasterStep:
     def __init__(self, dataset: AnyVRTDataset, name: str):
         for attr in ["dataset", "name"]:
             setattr(self, attr, locals()[attr])
-    
+
 
 class VRaster:
     steps: list[VRasterStep]
@@ -31,10 +35,7 @@ class VRaster:
 
     @classmethod
     def load_file(cls, filepath: str | Path):
-        step = VRasterStep(
-            VRTDataset.from_file(filepath),
-            name="load_file"
-        )
+        step = VRasterStep(VRTDataset.from_file(filepath), name="load_file")
 
         return cls(steps=[step])
 
@@ -45,7 +46,59 @@ class VRaster:
             self.last.save_vrt(filepath)
             return [filepath]
 
-             
+    def _check_compatibility(self, other: "VRaster") -> str | None:
+        if self.crs != other.crs:
+            return f"CRS is different: {self.crs} != {other.crs}"
+
+        if self.n_bands != other.n_bands:
+            return f"Number of bands must be the same: {self.n_bands} != {other.n_bands}"
+
+    @overload
+    def read(
+        self,
+        band: int | list[int] | None,
+        out: np.ndarray | np.ma.masked_array | None,
+        window: Window | None,
+        masked: Literal[True],
+        **kwargs
+    ) -> np.ma.masked_array: ...
+
+    @overload
+    def read(
+        self,
+        band: int | list[int] | None,
+        out: np.ndarray | np.ma.masked_array | None,
+        window: Window | None,
+        masked: Literal[False],
+        **kwargs
+    ) -> np.ndarray: ...
+        
+    @overload
+    def read(
+        self,
+        band: int | list[int] | None,
+        out: np.ndarray | np.ma.masked_array | None,
+        window: Window | None,
+        masked: Literal[False],
+        **kwargs
+    ) -> np.ndarray: ...
+
+    def read(
+        self,
+        band: int | list[int] | None = None,
+        out: np.ndarray | np.ma.masked_array | None = None,
+        window: Window | None = None,
+        masked: bool = False,
+        **kwargs
+    ) -> np.ndarray | np.ma.masked_array:
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = self.last.to_tempfiles(temp_dir)[1]
+
+            with rio.open(filepath) as raster:
+                return raster.read(band, out=out, masked=masked, window=window, **kwargs)
+
+
     def add(self, other: int | float) -> "VRaster":
         new_vraster = self.copy()
         new = new_vraster.last.copy()
@@ -56,29 +109,30 @@ class VRaster:
 
             for i, band in enumerate(new.raster_bands):
                 if misc.nested_getattr(band, ["pixel_function", "name"]) == "scale":
-                    band.sources.append(SimpleSource(
-                        source_filename=other.last,
-                        source_band=i + 1,
-                    ))
+                    band.sources.append(
+                        SimpleSource(
+                            source_filename=other.last,
+                            source_band=i + 1,
+                        )
+                    )
                 else:
                     new_band = VRTDerivedRasterBand.from_raster_band(
-                        band=band,
-                        pixel_function=pixel_functions.SumPixelFunction()
+                        band=band, pixel_function=pixel_functions.SumPixelFunction()
                     )
                     new_band.sources = [
                         SimpleSource(
                             source_filename=new_vraster.last,
                             source_band=i + 1,
-                            ),
+                        ),
                         SimpleSource(
                             source_filename=other.last,
                             source_band=i + 1,
-                        )
+                        ),
                     ]
 
                     new.raster_bands[i] = new_band
             name = "add_vraster"
-               
+
         else:
             for i, band in enumerate(new.raster_bands):
                 if misc.nested_getattr(band, ["pixel_function", "name"]) == "scale":
@@ -87,10 +141,7 @@ class VRaster:
                     else:
                         band.offset = other
                 else:
-                    new_band = VRTDerivedRasterBand.from_raster_band(
-                        band=band,
-                        pixel_function=ScalePixelFunction()
-                    )
+                    new_band = VRTDerivedRasterBand.from_raster_band(band=band, pixel_function=ScalePixelFunction())
                     new_band.sources = [
                         SimpleSource(
                             source_filename=new_vraster.last,
@@ -104,7 +155,13 @@ class VRaster:
         new_vraster.steps.append(VRasterStep(new, name))
         return new_vraster
 
-    def multiply(self, other: int | float) -> "VRaster":
+    def __add__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.add(other)
+
+    def __radd__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.__add__(other)
+
+    def multiply(self, other: int | float | "VRaster") -> "VRaster":
         new_vraster = self.copy()
 
         new = new_vraster.last.copy()
@@ -114,14 +171,15 @@ class VRaster:
 
             for i, band in enumerate(new.raster_bands):
                 if misc.nested_getattr(band, ["pixel_function", "name"]) == "mul":
-                    band.sources.append(SimpleSource(
-                        source_filename=other.last,
-                        source_band=i + 1,
-                    ))
+                    band.sources.append(
+                        SimpleSource(
+                            source_filename=other.last,
+                            source_band=i + 1,
+                        )
+                    )
                 else:
                     new_band = VRTDerivedRasterBand.from_raster_band(
-                        band=band,
-                        pixel_function=pixel_functions.MulPixelFunction()
+                        band=band, pixel_function=pixel_functions.MulPixelFunction()
                     )
                     new_band.sources = [
                         SimpleSource(
@@ -131,7 +189,7 @@ class VRaster:
                         SimpleSource(
                             source_filename=other.last,
                             source_band=i + 1,
-                        )
+                        ),
                     ]
 
                     new.raster_bands[i] = new_band
@@ -145,11 +203,10 @@ class VRaster:
                         band.scale *= other
                     else:
                         band.scale = other
+                    if band.offset is not None:
+                        band.offset *= other
                 else:
-                    new_band = VRTDerivedRasterBand.from_raster_band(
-                        band=band,
-                        pixel_function=ScalePixelFunction()
-                    )
+                    new_band = VRTDerivedRasterBand.from_raster_band(band=band, pixel_function=ScalePixelFunction())
                     new_band.sources = [
                         SimpleSource(
                             source_filename=new_vraster.last,
@@ -163,36 +220,37 @@ class VRaster:
         new_vraster.steps.append(VRasterStep(new, name))
         return new_vraster
 
+    def __mul__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.multiply(other)
+
+    def __rmul__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.__mul__(other)
+
+    def __neg__(self) -> "VRaster":
+        return self.multiply(-1)
+
     def replace_nodata(self, value: int | float):
         new_vraster = self.copy()
         new = new_vraster.last.copy()
 
         for i, band in enumerate(new.raster_bands):
-            new_band = VRTDerivedRasterBand.from_raster_band(band=band, pixel_function=pixel_functions.ReplaceNodataPixelFunction(value=value))
-            new_band.sources = [
-                SimpleSource(source_filename=new_vraster.last, source_band=i + 1)
-            ]
+            new_band = VRTDerivedRasterBand.from_raster_band(
+                band=band, pixel_function=pixel_functions.ReplaceNodataPixelFunction(value=value)
+            )
+            new_band.sources = [SimpleSource(source_filename=new_vraster.last, source_band=i + 1)]
             new.raster_bands[i] = new_band
 
         new_vraster.steps.append(VRasterStep(new, "replace_nodata"))
         return new_vraster
 
-    def _check_compatibility(self, other: "VRaster") -> str | None:
-        if self.crs != other.crs:
-            return f"CRS is different: {self.crs} != {other.crs}"
-
-        if self.n_bands != other.n_bands:
-            return f"Number of bands must be the same: {self.n_bands} != {other.n_bands}"
-
-
     def inverse(self) -> "VRaster":
         new_vraster = self.copy()
         new = new_vraster.last.copy()
         for i, band in enumerate(new.raster_bands):
-            new_band = VRTDerivedRasterBand.from_raster_band(band=band, pixel_function=pixel_functions.InvPixelFunction())
-            new_band.sources = [
-                SimpleSource(source_filename=new_vraster.last, source_band=i + 1)
-            ]
+            new_band = VRTDerivedRasterBand.from_raster_band(
+                band=band, pixel_function=pixel_functions.InvPixelFunction()
+            )
+            new_band.sources = [SimpleSource(source_filename=new_vraster.last, source_band=i + 1)]
             new.raster_bands[i] = new_band
 
         new_vraster.steps.append(VRasterStep(new, "inverse"))
@@ -207,8 +265,7 @@ class VRaster:
 
             for i, band in enumerate(new.raster_bands):
                 new_band = VRTDerivedRasterBand.from_raster_band(
-                    band=band,
-                    pixel_function=pixel_functions.DivPixelFunction()
+                    band=band, pixel_function=pixel_functions.DivPixelFunction()
                 )
                 new_band.sources = [
                     SimpleSource(
@@ -218,7 +275,7 @@ class VRaster:
                     SimpleSource(
                         source_filename=other.last.copy(),
                         source_band=i + 1,
-                    )
+                    ),
                 ]
 
                 new.raster_bands[i] = new_band
@@ -230,7 +287,19 @@ class VRaster:
             new.steps[-1].name = "divide_constant"
         return new
 
-    def subtract(self, other: int | float) -> "VRaster":
+    def __div__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.divide(other)
+
+    def __rdiv__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.inverse().__rmul__(other)
+
+    def __rtruediv__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.__rdiv__(other)
+
+    def __truediv__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.__div__(other)
+
+    def subtract(self, other: int | float | "VRaster") -> "VRaster":
         if isinstance(other, VRaster):
             negative = other.multiply(-1)
             new = self.add(negative)
@@ -239,15 +308,21 @@ class VRaster:
             new = self.add(-other)
             new.steps[-1].name = "subtract_constant"
         return new
-        
+
+    def __sub__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.subtract(other)
+
+    def __rsub__(self, other: int | float | "VRaster") -> "VRaster":
+        return self.__neg__().__add__(other)
+
     @property
     def n_bands(self) -> int:
         return self.last.n_bands
-    
+
     @property
     def crs(self) -> CRS:
         return self.last.crs
-    
+
     @property
     def transform(self) -> Affine:
         return self.last.transform
@@ -270,20 +345,33 @@ class VRaster:
     @property
     def last(self):
         return self.steps[-1].dataset
-        
+
     def sample(self, x_coord: float, y_coord: float, band: int | list[int] = 1, masked: bool = False):
 
         if self.last.is_nested():
             with tempfile.TemporaryDirectory(prefix="variete") as temp_dir:
-                return load_vrt(self.last.to_tempfiles(temp_dir=temp_dir)[1]).sample(x_coord=x_coord, y_coord=y_coord, band=band, masked=masked)
-                
+                return load_vrt(self.last.to_tempfiles(temp_dir=temp_dir)[1]).sample(
+                    x_coord=x_coord, y_coord=y_coord, band=band, masked=masked
+                )
+
         return self.steps[-1].dataset.sample(x_coord=x_coord, y_coord=y_coord, band=band, masked=masked)
 
     def sample_rowcol(self, row: int, col: int, band: int | list[int] = 1, masked: bool = False):
         x_coord, y_coord = rio.transform.xy(self.transform, row, col)
         return self.sample(x_coord, y_coord, band=band, masked=masked)
 
-        
-        
 
+def load(filepath: str | Path, nodata_to_nan: bool = True) -> VRaster:
 
+    vraster = VRaster.load_file(filepath)
+
+    if nodata_to_nan:
+        replace = False
+        for band in vraster.last.raster_bands:
+            if band.nodata is not None:
+                replace = True
+
+        if replace:
+            vraster = vraster.replace_nodata(np.nan)
+
+    return vraster

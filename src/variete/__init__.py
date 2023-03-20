@@ -1,1 +1,1 @@
-from .vraster import VRaster
+from .vraster import VRaster, load
