@@ -128,9 +128,13 @@ class VRTDataset:
 
     def __repr__(self):
         return "\n".join(
-            [f"VRTDataset: shape={self.shape}, crs=EPSG:{self.crs.to_epsg()}, bounds: {self.bounds()}"]
+            [f"VRTDataset: shape={self.shape}, crs=EPSG:{self.crs.to_epsg()}, bounds: {self.bounds}"]
             + ["\t" + "\n\t".join(band.__repr__().splitlines()) for band in self.raster_bands]
         )
+
+    @property
+    def n_bands(self) -> int:
+        return len(self.raster_bands)
 
     @property
     def bounds(self) -> rio.coords.BoundingBox:

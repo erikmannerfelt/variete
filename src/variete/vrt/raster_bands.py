@@ -137,6 +137,14 @@ class VRTDerivedRasterBand(VRTRasterBand):
         for attr in ["dtype", "band", "nodata", "color_interp", "sources", "scale", "offset", "pixel_function"]:
             setattr(self, attr, locals()[attr])
 
+    def __repr__(self):
+        return "\n".join(
+            [
+                f"VRTDerivedRasterBand: dtype: {self.dtype}, band: {self.band}, nodata: {self.nodata}, color_interp: {self.color_interp}, {self.pixel_function.__repr__()}",
+            ]
+            + ["\t" + "\n\t".join(source.__repr__().splitlines()) for source in self.sources]
+        )
+
     @classmethod
     def from_etree(cls, elem: ET.Element):
         sub_class = elem.get("subClass")

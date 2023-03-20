@@ -145,8 +145,9 @@ class ComplexSource:
         )
         filename_xml.text = str(self.source_filename)
 
-        band_xml = ET.SubElement(source_xml, "SourceBand")
-        band_xml.text = str(self.source_band)
+        if self.source_band is not None:
+            band_xml = ET.SubElement(source_xml, "SourceBand")
+            band_xml.text = str(self.source_band)
 
         if self.source_properties is not None:
             source_xml.append(self.source_properties.to_etree())

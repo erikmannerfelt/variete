@@ -18,6 +18,12 @@ class PixelFunction:
         for attr in ["arguments", "name", "code", "language"]:
             setattr(self, attr, locals()[attr])
 
+    def __repr__(self):
+        code_string = f" {len(self.code)} character custom code" if self.code is not None else ""
+        return "\n".join([
+            f"PixelFunction: {self.name}({self.arguments or ''}){code_string}"
+        ])
+
     def validate(self, n_bands: int):
         assert len(self.name) > 0, "The PixelFunction must have a name"
         assert self.language is None or self.language == "Python", "PixelFunction language must be None or 'Python'"
@@ -84,7 +90,7 @@ def pixel_function_from_etree(elem: ET.Element) -> AnyPixelFunction:
 
     if code is None:
         if name == "sum":
-            return SumPixelFunction(arguments["k"])
+            return SumPixelFunction(arguments.get("k", None))
         if name == "scale":
             return ScalePixelFunction()
         raise ValueError(f"Empty PixelFunctionCode and unknown type: {name}")
