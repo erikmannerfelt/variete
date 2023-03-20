@@ -204,6 +204,37 @@ class VRTDataset:
         with open(filepath, "w") as outfile:
             outfile.write(self.to_xml())
 
+    def save_vrt_nested(self, filepath: Path | str) -> list[Path]:
+        return list(set(self._save_vrt_nested(filepath=Path(filepath).absolute(), nested_level=[])))
+
+    def _save_vrt_nested(self, filepath: Path, nested_level: list[int]) -> list[Path]:
+        if len(nested_level) == 0:
+            save_filepath = filepath
+        else:
+            save_filepath = filepath.with_stem(filepath.stem + "-nested-" + "-".join(map(str, nested_level)))
+
+        nested_level += [0]
+        filepaths = [save_filepath]
+        j = 1
+        vrt = self.copy()
+        for raster_band in vrt.raster_bands:
+            for source in raster_band.sources:
+                if hasattr(source.source_filename, "_save_vrt_nested"):
+                    #new_filepath = filepath.with_stem(filepath.stem + "-" + str(j).zfill(2))
+                    new_nest = nested_level.copy()
+                    new_nest[-1] = j
+                    new_filepaths = source.source_filename._save_vrt_nested(filepath, new_nest)
+                    source.source_filename = new_filepaths[0]
+                    source.relative_filename = False
+                    filepaths += new_filepaths
+                    j += 1
+
+        vrt.save_vrt(save_filepath)
+        #print(f"Saved {save_filepath}: {nested_level}")
+        
+        return filepaths
+        
+
     @classmethod
     def from_file(cls, filepaths: Path | str | list[Path | str], **kwargs):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -226,6 +257,13 @@ class VRTDataset:
 
         if temp_dir is None:
             temp_dir = TemporaryDirectory(prefix="variete")
+
+        
+        temp_dir_path = Path(getattr(temp_dir, "name", temp_dir))
+        filepath = temp_dir_path.joinpath("vrtdataset.vrt")
+
+        self.save_vrt_nested(filepath)
+        return temp_dir, filepath
 
         vrt = self.copy()
         for raster_band in vrt.raster_bands:

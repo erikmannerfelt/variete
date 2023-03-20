@@ -226,9 +226,9 @@ class SimpleSource(ComplexSource):
         src_window: None = None,
         dst_window: None = None,
         relative_filename: None = None,
-        source_properties: None = None,
-        nodata: None = None,
         source_kind: None = None,
+        source_properties: None = None,
+        nodata: None = None
     ):
         if relative_filename is None:
             if isinstance(source_filename, Path):

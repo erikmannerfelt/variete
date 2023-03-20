@@ -174,3 +174,92 @@ def test_sample():
         assert np.array_equal(
             vrst.sample_rowcol([0, lr_rowcol[0]], [0, lr_rowcol[1]]), [upper_left_val, lower_right_val]
         )
+
+
+def test_save_vrt():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        make_test_raster(test_raster_path_a, mean_val=2)
+        test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
+        make_test_raster(test_raster_path_b, mean_val=5)
+
+        vrst_a = VRaster.load_file(test_raster_path_a)
+        vrst_b = VRaster.load_file(test_raster_path_b)
+
+        vrst_added = vrst_a.add(vrst_b)
+        vrst_multiplied = vrst_added.multiply(vrst_added)
+
+        # _print_nested(vrst_multiplied)
+
+        save_path = test_raster_path_a.with_stem("test_a_save").with_suffix(".vrt")
+        vrst_a.save_vrt(save_path)
+
+        loaded = VRaster.load_file(save_path)
+
+        assert loaded.crs == vrst_a.crs
+        assert loaded.transform == vrst_a.transform
+
+        save_path = save_path.with_stem("test_added_save")
+
+        vrst_multiplied.save_vrt(save_path)
+
+        # for path in sorted(list(save_path.parent.iterdir())):
+        #     if "test_added_save" not in path.name:
+        #         continue
+
+        #     print(str(path) + ":\n")
+        #     with open(path) as infile:
+        #         print(infile.read())
+
+        #     print("\n")
+
+        loaded = VRaster.load_file(save_path)
+
+        assert loaded.crs == vrst_a.crs
+        assert loaded.transform == vrst_a.transform
+
+        assert loaded.sample_rowcol(0, 0) == vrst_multiplied.sample_rowcol(0, 0)
+
+
+def test_replace_nodata():
+
+    nodata_data = np.ones((50, 100), dtype="float32")
+    nodata_data[:5, :5] = -9999
+
+    other_data = np.ones_like(nodata_data) + 1
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        make_test_raster(test_raster_path_a, assign_values=nodata_data)
+        test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
+        make_test_raster(test_raster_path_b, assign_values=other_data)
+
+        vrst_a = VRaster.load_file(test_raster_path_a)
+        vrst_a_filled = vrst_a.replace_nodata(np.nan)
+
+        vrst_b = VRaster.load_file(test_raster_path_b)
+        vrst_b_filled = vrst_b.replace_nodata(np.nan)
+
+        diff = vrst_a_filled.subtract(vrst_b_filled)
+        prod = vrst_a_filled.multiply(vrst_b_filled)
+        div = vrst_a_filled.divide(vrst_b_filled)
+        inv = vrst_a_filled.inverse()
+
+        for vrst, expected_ul, expected_mid in [
+            (vrst_a, -9999.0, 1.0),
+            (vrst_a_filled, "nan", 1.0),
+            (vrst_b, 2.0, 2.0),
+            (vrst_b_filled, 2.0, 2.0),
+            (diff, "nan", -1.),
+            (prod, "nan", 2.),
+            (div, "nan", 0.5),
+            (inv, "nan", 1.),
+        ]:
+            value_ul = vrst.sample_rowcol(0, 0)
+            if expected_ul == "nan":
+                assert np.isnan(value_ul)
+            else:
+                assert value_ul == expected_ul
+
+            assert vrst.sample_rowcol(25, 25) == expected_mid
+

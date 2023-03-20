@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 from rasterio.warp import Resampling
 from rasterio import Affine, CRS
+from typing import Any
 
 def get_resampling_gdal_to_numpy():
     resamplings = {"NearestNeighbour": Resampling.nearest, "CubicSpline": Resampling.cubic_spline}
@@ -77,5 +78,12 @@ def crs_to_string(crs: CRS) -> str:
         return f"EPSG:{epsg_code}"
 
     return crs.to_wkt()
+    
+
+def nested_getattr(obj: object, names: list[str], default: Any | None = None) -> Any:
+    for name in names:
+        obj = getattr(obj, name, default)
+
+    return obj
     
 

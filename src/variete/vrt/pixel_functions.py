@@ -91,6 +91,13 @@ class ScalePixelFunction(PixelFunction):
         self.name = "scale"
         self.arguments = self.code = self.language = None
 
+class ReplaceNodataPixelFunction(PixelFunction):
+    def __init__(self, value: int | float):
+        self.name = "replace_nodata"
+        self.arguments = {"to": misc.number_to_gdal(value)}
+        self.code = self.language = None
+        
+
 
 AnyPixelFunction = (
     PixelFunction | SumPixelFunction | ScalePixelFunction | MulPixelFunction | DivPixelFunction | InvPixelFunction
@@ -124,6 +131,8 @@ def pixel_function_from_etree(elem: ET.Element) -> AnyPixelFunction:
             return DivPixelFunction(arguments.get("k", None))
         if name == "inv":
             return InvPixelFunction()
+        if name == "replace_nodata":
+            return ReplaceNodataPixelFunction(arguments["to"])
         raise ValueError(f"Empty PixelFunctionCode and unknown type: {name}")
 
     return PixelFunction(name=name, arguments=arguments, code=code, language=language)

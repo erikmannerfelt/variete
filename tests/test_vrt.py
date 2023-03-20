@@ -10,17 +10,20 @@ import os
 import pytest
 
 
-def make_test_raster(filepath: Path, nodata: float = -9999., mean_val: int | float | None = None):
+def make_test_raster(filepath: Path, nodata: float = -9999., mean_val: int | float | None = None, assign_values: np.ndarray | None = None):
     crs = rio.crs.CRS.from_epsg(32633)
     transform = rio.transform.from_origin(5e5, 8.7e6, 10, 10) 
 
-    data = np.multiply(*np.meshgrid(
-        np.sin(np.linspace(0, np.pi * 2, 100)) * 5,
-        np.sin(np.linspace(0, np.pi / 2, 50)) * 10,
-    )).astype("float32")
+    if assign_values is not None:
+        data = assign_values
+    else:
+        data = np.multiply(*np.meshgrid(
+            np.sin(np.linspace(0, np.pi * 2, 100)) * 5,
+            np.sin(np.linspace(0, np.pi / 2, 50)) * 10,
+        )).astype("float32")
 
-    if mean_val is not None:
-        data += mean_val
+        if mean_val is not None:
+            data += mean_val - data.mean()
 
     with rio.open(filepath, "w", "GTiff", width=data.shape[1], dtype="float32", height=data.shape[0], count=1, crs=crs, transform=transform, nodata=nodata) as raster:
         raster.write(data, 1)

@@ -12,6 +12,7 @@ from variete.vrt.raster_bands import VRTDerivedRasterBand
 from variete.vrt.pixel_functions import ScalePixelFunction
 from variete.vrt import pixel_functions
 from variete.vrt.sources import SimpleSource
+from variete import misc
 
 class VRasterStep:
     dataset: AnyVRTDataset
@@ -36,6 +37,14 @@ class VRaster:
         )
 
         return cls(steps=[step])
+
+    def save_vrt(self, filepath: str | Path) -> list[Path]:
+        if self.last.is_nested():
+            return self.last.save_vrt_nested(filepath)
+        else:
+            self.last.save_vrt(filepath)
+            return [filepath]
+
              
     def add(self, other: int | float) -> "VRaster":
         new_vraster = self.copy()
@@ -46,7 +55,7 @@ class VRaster:
                 raise AssertionError(message)
 
             for i, band in enumerate(new.raster_bands):
-                if isinstance(getattr(band, "pixel_function", None), pixel_functions.SumPixelFunction):
+                if misc.nested_getattr(band, ["pixel_function", "name"]) == "scale":
                     band.sources.append(SimpleSource(
                         source_filename=other.last,
                         source_band=i + 1,
@@ -60,7 +69,7 @@ class VRaster:
                         SimpleSource(
                             source_filename=new_vraster.last,
                             source_band=i + 1,
-                        ),
+                            ),
                         SimpleSource(
                             source_filename=other.last,
                             source_band=i + 1,
@@ -72,7 +81,7 @@ class VRaster:
                
         else:
             for i, band in enumerate(new.raster_bands):
-                if isinstance(band, VRTDerivedRasterBand):
+                if misc.nested_getattr(band, ["pixel_function", "name"]) == "scale":
                     if band.offset is not None:
                         band.offset += other
                     else:
@@ -104,7 +113,7 @@ class VRaster:
                 raise AssertionError(message)
 
             for i, band in enumerate(new.raster_bands):
-                if isinstance(getattr(band, "pixel_function", None), pixel_functions.MulPixelFunction):
+                if misc.nested_getattr(band, ["pixel_function", "name"]) == "mul":
                     band.sources.append(SimpleSource(
                         source_filename=other.last,
                         source_band=i + 1,
@@ -131,7 +140,7 @@ class VRaster:
             name = "multiply_vraster"
         else:
             for i, band in enumerate(new.raster_bands):
-                if isinstance(band, VRTDerivedRasterBand):
+                if misc.nested_getattr(band, ["pixel_function", "name"]) == "scale":
                     if band.scale is not None:
                         band.scale *= other
                     else:
@@ -154,6 +163,19 @@ class VRaster:
         new_vraster.steps.append(VRasterStep(new, name))
         return new_vraster
 
+    def replace_nodata(self, value: int | float):
+        new_vraster = self.copy()
+        new = new_vraster.last.copy()
+
+        for i, band in enumerate(new.raster_bands):
+            new_band = VRTDerivedRasterBand.from_raster_band(band=band, pixel_function=pixel_functions.ReplaceNodataPixelFunction(value=value))
+            new_band.sources = [
+                SimpleSource(source_filename=new_vraster.last, source_band=i + 1)
+            ]
+            new.raster_bands[i] = new_band
+
+        new_vraster.steps.append(VRasterStep(new, "replace_nodata"))
+        return new_vraster
 
     def _check_compatibility(self, other: "VRaster") -> str | None:
         if self.crs != other.crs:
@@ -164,7 +186,6 @@ class VRaster:
 
 
     def inverse(self) -> "VRaster":
-
         new_vraster = self.copy()
         new = new_vraster.last.copy()
         for i, band in enumerate(new.raster_bands):
@@ -261,7 +282,6 @@ class VRaster:
     def sample_rowcol(self, row: int, col: int, band: int | list[int] = 1, masked: bool = False):
         x_coord, y_coord = rio.transform.xy(self.transform, row, col)
         return self.sample(x_coord, y_coord, band=band, masked=masked)
-        #self.steps[-1].dataset.sample_rowcol(row=row, col=col)
 
         
         
