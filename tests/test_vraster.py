@@ -1,14 +1,22 @@
 from variete.vraster import VRaster
 import tempfile
-from pathlib import Path 
-import rasterio as rio
-import rasterio.warp
+from pathlib import Path
 import numpy as np
-import warnings
-import pytest
-import os
 
 from test_vrt import make_test_raster
+
+
+def _print_nested(vraster: VRaster):
+    """Print the content of all vrts in a rendered nested VRaster."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        vraster.last.to_tempfiles(temp_dir)
+
+        for filepath in Path(temp_dir).iterdir():
+            print(f"{filepath}:")
+            with open(filepath) as infile:
+                print(infile.read())
+
+            print("\n")
 
 
 def test_load_vraster():
@@ -21,6 +29,7 @@ def test_load_vraster():
         assert vrst.crs == raster_params["crs"]
         assert vrst.transform == raster_params["transform"]
         assert vrst.shape == raster_params["data"].shape
+
 
 def test_constant_add_subtract():
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -43,10 +52,11 @@ def test_constant_add_subtract():
         assert vrst_added.last.raster_bands[0].sources[0].source_filename == vrst_added.steps[-2].dataset
 
         # The band has been added and subtracted by 5, so the final offset should be 0
-        assert vrst_subtracted.last.raster_bands[0].offset == 0.
+        assert vrst_subtracted.last.raster_bands[0].offset == 0.0
 
         assert vrst.sample_rowcol(0, 0) + offset == vrst_added.sample_rowcol(0, 0)
         assert vrst.sample_rowcol(0, 0) == vrst_subtracted.sample_rowcol(0, 0)
+
 
 def test_vraster_add_subtract():
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -67,8 +77,6 @@ def test_vraster_add_subtract():
         assert vrst_subtracted.sample_rowcol(0, 0) == vrst_a.sample_rowcol(0, 0)
 
 
-    
-
 def test_constant_multiply_divide():
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -87,15 +95,58 @@ def test_constant_multiply_divide():
 
         assert vrst_multiplied.last.raster_bands[0].scale == factor
 
-        print(vrst_divided.steps[-2].dataset.raster_bands[0].scale)
-
         # The band has been multiplied and divided by 2, so the scale should now be 1.
-        assert vrst_divided.last.raster_bands[0].scale == 1.
-    
-        assert vrst_multiplied.steps[-1].dataset.raster_bands[0].sources[0].source_filename == vrst_multiplied.steps[-2].dataset
+        assert vrst_divided.last.raster_bands[0].scale == 1.0
+
+        assert (
+            vrst_multiplied.steps[-1].dataset.raster_bands[0].sources[0].source_filename
+            == vrst_multiplied.steps[-2].dataset
+        )
 
         assert vrst.sample_rowcol(0, 0) * factor == vrst_multiplied.sample_rowcol(0, 0)
         assert vrst.sample_rowcol(0, 0) == vrst_divided.sample_rowcol(0, 0)
+
+
+def test_vraster_multiply():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        make_test_raster(test_raster_path_a, mean_val=2)
+        test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
+        make_test_raster(test_raster_path_b, mean_val=5)
+
+        vrst_a = VRaster.load_file(test_raster_path_a)
+        vrst_b = VRaster.load_file(test_raster_path_b)
+
+        vrst_multiplied = vrst_a.multiply(vrst_b)
+
+        assert vrst_a.sample_rowcol(0, 0) * vrst_b.sample_rowcol(0, 0) == vrst_multiplied.sample_rowcol(0, 0)
+
+
+def test_vraster_inverse():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        make_test_raster(test_raster_path, mean_val=2)
+
+        vrst = VRaster.load_file(test_raster_path)
+
+        vrst_inverse = vrst.inverse()
+
+        assert 1 / vrst.sample_rowcol(0, 0) == vrst_inverse.sample_rowcol(0, 0)
+
+
+def test_vraster_divide():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        make_test_raster(test_raster_path_a, mean_val=2)
+        test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
+        make_test_raster(test_raster_path_b, mean_val=5)
+
+        vrst_a = VRaster.load_file(test_raster_path_a)
+        vrst_b = VRaster.load_file(test_raster_path_b)
+
+        vrst_divided = vrst_a.divide(vrst_b)
+
+        assert vrst_a.sample_rowcol(0, 0) / vrst_b.sample_rowcol(0, 0) == vrst_divided.sample_rowcol(0, 0)
 
 
 def test_sample():
@@ -120,5 +171,6 @@ def test_sample():
         assert upper_left_val == vrst.sample_rowcol(0, 0)
         assert lower_right_val == vrst.sample_rowcol(*lr_rowcol)
 
-        assert np.array_equal(vrst.sample_rowcol([0, lr_rowcol[0]], [0, lr_rowcol[1]]) , [upper_left_val, lower_right_val])
-
+        assert np.array_equal(
+            vrst.sample_rowcol([0, lr_rowcol[0]], [0, lr_rowcol[1]]), [upper_left_val, lower_right_val]
+        )

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pathlib import Path
 import copy
 import tempfile
@@ -40,14 +41,12 @@ class VRaster:
         new_vraster = self.copy()
         new = new_vraster.last.copy()
 
-        #if hasattr(other, "_check_compatibility"):
         if isinstance(other, VRaster):
             if (message := self._check_compatibility(other)) is not None:
                 raise AssertionError(message)
 
             for i, band in enumerate(new.raster_bands):
                 if isinstance(getattr(band, "pixel_function", None), pixel_functions.SumPixelFunction):
-                #if isinstance(band, VRTDerivedRasterBand):
                     band.sources.append(SimpleSource(
                         source_filename=other.last,
                         source_band=i + 1,
@@ -104,7 +103,31 @@ class VRaster:
             if (message := self._check_compatibility(other)) is not None:
                 raise AssertionError(message)
 
-            raise NotImplementedError("Not yet implemented for VRaster")
+            for i, band in enumerate(new.raster_bands):
+                if isinstance(getattr(band, "pixel_function", None), pixel_functions.MulPixelFunction):
+                    band.sources.append(SimpleSource(
+                        source_filename=other.last,
+                        source_band=i + 1,
+                    ))
+                else:
+                    new_band = VRTDerivedRasterBand.from_raster_band(
+                        band=band,
+                        pixel_function=pixel_functions.MulPixelFunction()
+                    )
+                    new_band.sources = [
+                        SimpleSource(
+                            source_filename=new_vraster.last,
+                            source_band=i + 1,
+                        ),
+                        SimpleSource(
+                            source_filename=other.last,
+                            source_band=i + 1,
+                        )
+                    ]
+
+                    new.raster_bands[i] = new_band
+
+            # raise NotImplementedError("Not yet implemented for VRaster")
             name = "multiply_vraster"
         else:
             for i, band in enumerate(new.raster_bands):
@@ -140,9 +163,47 @@ class VRaster:
             return f"Number of bands must be the same: {self.n_bands} != {other.n_bands}"
 
 
-    def divide(self, other: int | float) -> "VRaster":
+    def inverse(self) -> "VRaster":
+
+        new_vraster = self.copy()
+        new = new_vraster.last.copy()
+        for i, band in enumerate(new.raster_bands):
+            new_band = VRTDerivedRasterBand.from_raster_band(band=band, pixel_function=pixel_functions.InvPixelFunction())
+            new_band.sources = [
+                SimpleSource(source_filename=new_vraster.last, source_band=i + 1)
+            ]
+            new.raster_bands[i] = new_band
+
+        new_vraster.steps.append(VRasterStep(new, "inverse"))
+        return new_vraster
+
+    def divide(self, other: int | float | "VRaster") -> "VRaster":
         if isinstance(other, VRaster):
-            raise NotImplementedError("Not yet implemented for VRaster")
+            new_vraster = self.copy()
+            new = new_vraster.last.copy()
+            if (message := self._check_compatibility(other)) is not None:
+                raise AssertionError(message)
+
+            for i, band in enumerate(new.raster_bands):
+                new_band = VRTDerivedRasterBand.from_raster_band(
+                    band=band,
+                    pixel_function=pixel_functions.DivPixelFunction()
+                )
+                new_band.sources = [
+                    SimpleSource(
+                        source_filename=new_vraster.last,
+                        source_band=i + 1,
+                    ),
+                    SimpleSource(
+                        source_filename=other.last.copy(),
+                        source_band=i + 1,
+                    )
+                ]
+
+                new.raster_bands[i] = new_band
+
+            new_vraster.steps.append(VRasterStep(new, "divide_vraster"))
+            return new_vraster
         else:
             new = self.multiply(1 / other)
             new.steps[-1].name = "divide_constant"

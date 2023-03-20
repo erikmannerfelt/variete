@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as ET
 from rasterio.warp import Resampling
-from rasterio import Affine
+from rasterio import Affine, CRS
 
 def get_resampling_gdal_to_numpy():
     resamplings = {"NearestNeighbour": Resampling.nearest, "CubicSpline": Resampling.cubic_spline}
@@ -71,3 +71,11 @@ def transform_to_gdal(transform: Affine) -> str:
 
 def parse_gdal_transform(string: str) -> Affine:
     return Affine.from_gdal(*map(float, string.split(",")))
+
+def crs_to_string(crs: CRS) -> str:
+    if (epsg_code := crs.to_epsg()) is not None:
+        return f"EPSG:{epsg_code}"
+
+    return crs.to_wkt()
+    
+

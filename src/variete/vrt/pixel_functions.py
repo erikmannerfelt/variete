@@ -2,6 +2,7 @@ from typing import Literal
 from variete import misc
 import xml.etree.ElementTree as ET
 
+
 class PixelFunction:
     name: str
     arguments: dict[str, str] | None
@@ -20,9 +21,7 @@ class PixelFunction:
 
     def __repr__(self):
         code_string = f" {len(self.code)} character custom code" if self.code is not None else ""
-        return "\n".join([
-            f"PixelFunction: {self.name}({self.arguments or ''}){code_string}"
-        ])
+        return "\n".join([f"PixelFunction: {self.name}({self.arguments or ''}){code_string}"])
 
     def validate(self, n_bands: int):
         assert len(self.name) > 0, "The PixelFunction must have a name"
@@ -64,13 +63,39 @@ class SumPixelFunction(PixelFunction):
         if n_bands < 2:
             raise ValueError("SumPixelFunction requires at least two bands (or one band and a constant")
 
+
+class MulPixelFunction(PixelFunction):
+    def __init__(self, constant: int | float | None = None):
+        base = SumPixelFunction(constant=constant)
+        self.name = "mul"
+        for attr in ["arguments", "code", "language"]:
+            setattr(self, attr, getattr(base, attr))
+
+
+class DivPixelFunction(PixelFunction):
+    def __init__(self, constant: int | float | None = None):
+        base = SumPixelFunction(constant=constant)
+        self.name = "div"
+        for attr in ["arguments", "code", "language"]:
+            setattr(self, attr, getattr(base, attr))
+
+
+class InvPixelFunction(PixelFunction):
+    def __init__(self):
+        self.name = "inv"
+        self.arguments = self.code = self.language = None
+
+
 class ScalePixelFunction(PixelFunction):
     def __init__(self):
         self.name = "scale"
         self.arguments = self.code = self.language = None
 
 
-AnyPixelFunction = PixelFunction | SumPixelFunction | ScalePixelFunction
+AnyPixelFunction = (
+    PixelFunction | SumPixelFunction | ScalePixelFunction | MulPixelFunction | DivPixelFunction | InvPixelFunction
+)
+
 
 def pixel_function_from_etree(elem: ET.Element) -> AnyPixelFunction:
 
@@ -93,6 +118,12 @@ def pixel_function_from_etree(elem: ET.Element) -> AnyPixelFunction:
             return SumPixelFunction(arguments.get("k", None))
         if name == "scale":
             return ScalePixelFunction()
+        if name == "mul":
+            return MulPixelFunction(arguments.get("k", None))
+        if name == "div":
+            return DivPixelFunction(arguments.get("k", None))
+        if name == "inv":
+            return InvPixelFunction()
         raise ValueError(f"Empty PixelFunctionCode and unknown type: {name}")
 
     return PixelFunction(name=name, arguments=arguments, code=code, language=language)

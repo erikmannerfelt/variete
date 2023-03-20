@@ -151,7 +151,7 @@ class VRTDataset:
         vrt = ET.Element("VRTDataset", {"rasterXSize": str(self.shape[1]), "rasterYSize": str(self.shape[0])})
 
         crs = ET.SubElement(vrt, "SRS", {"dataAxisToSRSAxisMapping": self.crs_mapping})
-        crs.text = f"EPSG:{self.crs.to_epsg()}"
+        crs.text = misc.crs_to_string(self.crs)
 
         transform = ET.SubElement(vrt, "GeoTransform")
         transform.text = misc.transform_to_gdal(self.transform)
@@ -426,7 +426,7 @@ class WarpedVRTDataset(VRTDataset):
         )
 
         crs = ET.SubElement(vrt, "SRS", {"dataAxisToSRSAxisMapping": self.crs_mapping})
-        crs.text = f"EPSG:{self.crs.to_epsg()}"
+        crs.text = misc.crs_to_string(self.crs)
 
         transform = ET.SubElement(vrt, "GeoTransform")
         transform.text = misc.transform_to_gdal(self.transform)
