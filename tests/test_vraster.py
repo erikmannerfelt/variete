@@ -3,6 +3,9 @@ from variete.vraster import VRaster
 import tempfile
 from pathlib import Path
 import numpy as np
+import rasterio.warp
+import rasterio as rio
+import pytest
 
 from test_vrt import make_test_raster
 
@@ -19,6 +22,7 @@ def _print_nested(vraster: VRaster):
 
             print("\n")
 
+
 def test_load_vraster():
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
@@ -30,7 +34,6 @@ def test_load_vraster():
         assert vrst.transform == raster_params["transform"]
         assert vrst.shape == raster_params["data"].shape
 
-        
         vrst2 = variete.load(test_raster_path, nodata_to_nan=True)
         assert vrst2.steps[-1].name == "replace_nodata"
 
@@ -272,10 +275,10 @@ def test_replace_nodata():
             (vrst_a_filled, "nan", 1.0),
             (vrst_b, 2.0, 2.0),
             (vrst_b_filled, 2.0, 2.0),
-            (diff, "nan", -1.),
-            (prod, "nan", 2.),
+            (diff, "nan", -1.0),
+            (prod, "nan", 2.0),
             (div, "nan", 0.5),
-            (inv, "nan", 1.),
+            (inv, "nan", 1.0),
         ]:
             value_ul = vrst.sample_rowcol(0, 0)
             if expected_ul == "nan":
@@ -305,19 +308,74 @@ def test_overloading():
         five = four + 1
 
         tests = [
-            (two + four, 6.),
-            (four - one, 3.),
-            (four / two, 2.),
-            (four * two, 8.),
-            (four + 1, 5.),
-            (five - 1, 4.),
-            (four / 4, 1.),
-            (five * 5, 25.),
-            (1 + four, 5.),
-            (6 - four, 2.),
-            (8 * one, 8.),
-            (4 / four, 1.),
+            (two + four, 6.0),
+            (four - one, 3.0),
+            (four / two, 2.0),
+            (four * two, 8.0),
+            (four + 1, 5.0),
+            (five - 1, 4.0),
+            (four / 4, 1.0),
+            (five * 5, 25.0),
+            (1 + four, 5.0),
+            (6 - four, 2.0),
+            (8 * one, 8.0),
+            (4 / four, 1.0),
         ]
 
         for i, (vrst, expected) in enumerate(tests):
             assert vrst.sample_rowcol(0, 0) == expected, f"test {i} failed"
+
+
+def test_raster_warp():
+    two_arr = np.ones((50, 100), dtype="float32") + 1
+    four_arr = two_arr.copy() + 2
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        raster_a_params = make_test_raster(test_raster_path_a, assign_values=two_arr)
+
+        test_raster_path_a_warp = test_raster_path_a.with_stem("test_a_warped.tif")
+
+        raster_a_warp_params = {"data": np.zeros_like(raster_a_params["data"]), "crs": rio.CRS.from_epsg(3006)}
+        _, raster_a_warp_params["transform"] = rasterio.warp.reproject(
+            raster_a_params["data"],
+            raster_a_warp_params["data"],
+            dst_crs=raster_a_warp_params["crs"],
+            src_transform=raster_a_params["transform"],
+            src_crs=raster_a_params["crs"],
+            resampling=rasterio.warp.Resampling.bilinear,
+        )
+
+        with rio.open(
+            test_raster_path_a_warp,
+            "w",
+            driver="GTiff",
+            width=raster_a_warp_params["data"].shape[1],
+            height=raster_a_warp_params["data"].shape[0],
+            count=1,
+            crs=raster_a_warp_params["crs"],
+            transform=raster_a_warp_params["transform"],
+            dtype=raster_a_warp_params["data"].dtype,
+        ) as raster:
+            raster.write(raster_a_warp_params["data"], 1)
+
+        test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
+        make_test_raster(test_raster_path_b, assign_values=four_arr)
+
+
+        vrst_a = VRaster.load_file(test_raster_path_a)
+        vrst_a_warp = VRaster.load_file(test_raster_path_a_warp)
+        vrst_b = VRaster.load_file(test_raster_path_b)
+
+
+        assert vrst_a_warp.crs == raster_a_warp_params["crs"]
+        assert vrst_a.transform == vrst_b.transform
+
+        with pytest.raises(AssertionError, match="CRS is different.*"):
+            vrst_a - vrst_a_warp
+
+        vrst_a_warp_inverse = vrst_a_warp.warp(crs=vrst_a.crs, shape=vrst_a.shape, transform=vrst_a.transform)
+
+        assert vrst_a_warp_inverse.crs == vrst_a.crs
+
+        assert np.median(np.abs(vrst_a_warp_inverse.read(1) - vrst_a.read(1))) < 0.1

@@ -3,7 +3,7 @@ from pathlib import Path
 import rasterio as rio
 from affine import Affine
 import xml.etree.ElementTree as ET
-from typing import Literal, Callable, Iterable
+from typing import Literal, Callable, Iterable, Sequence
 import tempfile
 from osgeo import gdal
 from rasterio.coords import BoundingBox
@@ -72,6 +72,69 @@ def build_vrt(
         strict=strict,
     )
 
+
+def vrt_warp(
+    output_filepath: Path | str,
+    input_filepath: Path | str,
+    #src_crs: CRS | int | str | None = None,
+    dst_crs: CRS | int | str | None = None,
+    dst_res: tuple[float, float] | float | None = None, 
+    #src_res: tuple[float, float] | None = None,
+    dst_shape: tuple[int, int] | None = None,
+    #src_bounds: BoundingBox | list[float] | None = None,
+    dst_bounds: BoundingBox | list[float] | None = None,
+    #src_transform: Affine | None = None,
+    dst_transform: Affine | None = None,
+    resampling: Resampling | str = "bilinear",
+    multithread: bool = False,
+) -> None:
+
+    if isinstance(resampling, str):
+        resampling = getattr(Resampling, resampling)
+
+    kwargs = {"resampleAlg": misc.resampling_rio_to_gdal(resampling), "multithread": multithread, "format": "VRT"}
+
+    for key, crs in [("dstSRS", dst_crs)]:
+        if crs is None:
+            if key == "dst_wkt":
+                raise TypeError("dst_crs has to be provided")
+            continue
+        if isinstance(crs, int):
+            kwargs[key] = CRS.from_epsg(crs).to_wkt()
+        elif isinstance(crs, CRS):
+            kwargs[key] = crs.to_wkt()
+        else:
+            kwargs[key] = crs
+
+    if dst_transform is not None and dst_shape is None:
+        raise ValueError("dst_transform requires dst_shape, which was not supplied.")
+    if dst_transform is not None and dst_res is not None:
+        raise ValueError("dst_transform and dst_res cannot be used at the same time.")
+    if dst_transform is not None and dst_bounds is not None:
+        raise ValueError("dst_transform and dst_bounds cannot be used at the same time.")
+
+    if dst_shape is not None and dst_res is not None:
+        raise ValueError("dst_shape and dst_res cannot be used at the same time.") 
+
+    if dst_transform is not None:
+        #kwargs["dstTransform"] = dst_transform.to_gdal()
+        kwargs["outputBounds"] = list(rio.transform.array_bounds(*dst_shape, dst_transform))
+
+    if dst_shape is not None:
+        kwargs["width"] = dst_shape[1]
+        kwargs["height"] = dst_shape[0]
+
+
+    if dst_res is not None:
+        if isinstance(dst_res, Sequence):
+            kwargs["xRes"] = dst_res[0]
+            kwargs["yRes"] = dst_res[1]
+        else:
+            kwargs["xRes"] = dst_res
+            kwargs["yRes"] = dst_res
+
+
+    gdal.Warp(str(output_filepath), str(input_filepath), **kwargs)
 
 def build_warped_vrt(
     vrt_filepath: Path | str,
@@ -517,6 +580,30 @@ class WarpedVRTDataset(VRTDataset):
             band_list.append(misc.new_element("BandMapping", None, {"src": src, "dst": dst}))
 
         return vrt
+
+    def is_nested(self) -> bool:
+        return hasattr(self.source_dataset, "to_tempfiles")
+
+    def _save_vrt_nested(self, filepath: Path, nested_level: list[int]) -> list[Path]:
+        if len(nested_level) == 0:
+            save_filepath = filepath
+        else:
+            save_filepath = filepath.with_stem(filepath.stem + "-nested-" + "-".join(map(str, nested_level)))
+
+        nested_level += [0]
+        filepaths = [save_filepath]
+        vrt = self.copy()
+        if vrt.is_nested():
+            new_nest = nested_level[:-1] + [1]
+            new_filepaths = vrt.source_dataset._save_vrt_nested(filepath, new_nest) 
+            vrt.source_dataset = new_filepaths[0]
+            vrt.relative_filename = False
+            filepaths += new_filepaths
+
+        vrt.save_vrt(save_filepath)
+        #print(f"Saved {save_filepath}: {nested_level}")
+        
+        return filepaths
 
     @classmethod
     def from_file(cls, filepath: Path | str, dst_crs: CRS | int | str, **kwargs):

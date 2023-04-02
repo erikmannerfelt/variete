@@ -7,10 +7,11 @@ from rasterio.coords import BoundingBox
 from rasterio.transform import Affine
 from rasterio.crs import CRS
 from rasterio.windows import Window
+from rasterio.warp import Resampling
 import numpy as np
 from typing import overload, Literal
 
-from variete.vrt.vrt import VRTDataset, AnyVRTDataset, load_vrt
+from variete.vrt.vrt import VRTDataset, AnyVRTDataset, load_vrt, vrt_warp, build_vrt
 from variete.vrt.raster_bands import VRTDerivedRasterBand
 from variete.vrt.pixel_functions import ScalePixelFunction
 from variete.vrt import pixel_functions
@@ -60,8 +61,9 @@ class VRaster:
         out: np.ndarray | np.ma.masked_array | None,
         window: Window | None,
         masked: Literal[True],
-        **kwargs
-    ) -> np.ma.masked_array: ...
+        **kwargs,
+    ) -> np.ma.masked_array:
+        ...
 
     @overload
     def read(
@@ -70,9 +72,10 @@ class VRaster:
         out: np.ndarray | np.ma.masked_array | None,
         window: Window | None,
         masked: Literal[False],
-        **kwargs
-    ) -> np.ndarray: ...
-        
+        **kwargs,
+    ) -> np.ndarray:
+        ...
+
     @overload
     def read(
         self,
@@ -80,8 +83,9 @@ class VRaster:
         out: np.ndarray | np.ma.masked_array | None,
         window: Window | None,
         masked: Literal[False],
-        **kwargs
-    ) -> np.ndarray: ...
+        **kwargs,
+    ) -> np.ndarray:
+        ...
 
     def read(
         self,
@@ -89,7 +93,7 @@ class VRaster:
         out: np.ndarray | np.ma.masked_array | None = None,
         window: Window | None = None,
         masked: bool = False,
-        **kwargs
+        **kwargs,
     ) -> np.ndarray | np.ma.masked_array:
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -97,7 +101,6 @@ class VRaster:
 
             with rio.open(filepath) as raster:
                 return raster.read(band, out=out, masked=masked, window=window, **kwargs)
-
 
     def add(self, other: int | float) -> "VRaster":
         new_vraster = self.copy()
@@ -228,6 +231,51 @@ class VRaster:
 
     def __neg__(self) -> "VRaster":
         return self.multiply(-1)
+
+    def warp(
+        self,
+        crs: CRS | int | str | None = None,
+        res: tuple[float, float] | float | None = None,
+        shape: tuple[int, int] | None = None,
+        bounds: BoundingBox | list[float] | None = None,
+        transform: Affine | None = None,
+        resampling: Resampling | str = "bilinear",
+        multithread: bool = False,
+    ):
+        new_vraster = self.copy()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, vrt_filepath = new_vraster.last.to_tempfiles(temp_dir)
+
+            warped_path = vrt_filepath.with_stem("warped")
+            vrt_warp(
+                output_filepath=warped_path,
+                input_filepath=vrt_filepath,
+                dst_crs=crs,
+                dst_res=res,
+                dst_shape=shape,
+                dst_bounds=bounds,
+                dst_transform=transform,
+                resampling=resampling,
+                multithread=multithread,
+            )
+
+            warped = load_vrt(warped_path)
+
+            new_path = vrt_filepath.with_stem("new")
+            build_vrt(new_path, warped_path)
+
+            new = load_vrt(new_path)
+
+        warped.source_dataset = new_vraster.last
+
+        for band in new.raster_bands:
+            band.sources = [SimpleSource(source_filename=warped, source_band=band.band)]
+
+        new_vraster.steps.append(VRasterStep(warped, "warp"))
+        new_vraster.steps.append(VRasterStep(new, "warp_wrapped"))
+
+        return new_vraster
 
     def replace_nodata(self, value: int | float):
         new_vraster = self.copy()
