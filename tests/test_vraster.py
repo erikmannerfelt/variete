@@ -376,6 +376,9 @@ def test_raster_warp():
 
         vrst_a_warp_inverse = vrst_a_warp.warp(crs=vrst_a.crs, shape=vrst_a.shape, transform=vrst_a.transform)
 
-        assert vrst_a_warp_inverse.crs == vrst_a.crs
+        vrst_a_warp_inverse_b = vrst_a_warp.warp(reference=vrst_a)
 
-        assert np.median(np.abs(vrst_a_warp_inverse.read(1) - vrst_a.read(1))) < 0.1
+        for warped in [vrst_a_warp_inverse, vrst_a_warp_inverse_b]:
+            assert vrst_a._check_compatibility(warped) is None
+            assert np.nanmedian(np.abs(warped.read(1) - vrst_a.read(1))) < 0.1 
+

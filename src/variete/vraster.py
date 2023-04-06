@@ -234,6 +234,7 @@ class VRaster:
 
     def warp(
         self,
+        reference: "VRaster" | None = None,
         crs: CRS | int | str | None = None,
         res: tuple[float, float] | float | None = None,
         shape: tuple[int, int] | None = None,
@@ -244,21 +245,29 @@ class VRaster:
     ):
         new_vraster = self.copy()
 
+        warp_kwargs = {
+            "dst_crs": crs,
+            "dst_res": res,
+            "dst_shape": shape,
+            "dst_bounds": bounds,
+            "dst_transform": transform,
+            "resampling": resampling,
+        }
+
+        if reference is not None:
+            for key, value in [
+                ("dst_crs", reference.crs),
+                ("dst_shape", reference.shape),
+                ("dst_transform", reference.transform),
+            ]:
+                if warp_kwargs[key] is None:
+                    warp_kwargs[key] = value
+
         with tempfile.TemporaryDirectory() as temp_dir:
             _, vrt_filepath = new_vraster.last.to_tempfiles(temp_dir)
 
             warped_path = vrt_filepath.with_stem("warped")
-            vrt_warp(
-                output_filepath=warped_path,
-                input_filepath=vrt_filepath,
-                dst_crs=crs,
-                dst_res=res,
-                dst_shape=shape,
-                dst_bounds=bounds,
-                dst_transform=transform,
-                resampling=resampling,
-                multithread=multithread,
-            )
+            vrt_warp(output_filepath=warped_path, input_filepath=vrt_filepath, **warp_kwargs)
 
             warped = load_vrt(warped_path)
 
