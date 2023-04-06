@@ -1,3 +1,8 @@
+"""
+Definitions for the VRaster class.
+
+Most actual functionality is in the `vrt` module.
+"""
 from __future__ import annotations
 from pathlib import Path
 import copy
@@ -9,7 +14,7 @@ from rasterio.crs import CRS
 from rasterio.windows import Window
 from rasterio.warp import Resampling
 import numpy as np
-from typing import overload, Literal, Callable, Any
+from typing import overload, Literal, Callable, Any, Iterable
 from osgeo import gdal
 
 from variete.vrt.vrt import VRTDataset, AnyVRTDataset, load_vrt, vrt_warp, build_vrt
@@ -45,6 +50,7 @@ except ImportError:
 
 
 class VRasterStep:
+    """A VRTDataset and an associated name, for logging purposes."""
     dataset: AnyVRTDataset
     name: str
 
@@ -54,6 +60,15 @@ class VRasterStep:
 
 
 class VRaster:
+    """
+    A "Virtual Raster" containing information on how to process a raster on disk.  
+
+    A VRaster has no data loaded in memory, other than the processing steps to take when evaluating.
+    Evaluation is mainly done through the `VRaster.read()` or `VRaster.write()` functions.
+    """
+    # The steps list is a (largely) unordered list of steps and dependencies to the last (current) dataset
+    # The last dataset (VRaster.steps[-1]) is always the current one, but no other step is required for evaluation.
+    # All other steps are only to show the steps that were taken to get to the latest, and are all self-contained.
     steps: list[VRasterStep]
 
     def __init__(self, steps: list[VRasterStep] | None = None):
@@ -61,11 +76,36 @@ class VRaster:
 
     @classmethod
     def load_file(cls, filepath: str | Path):
+        """
+        Load a VRaster from a file.
+
+        Parameters
+        ----------
+        filepath
+            The filepath to a GDAL-supported dataset.
+        Returns
+        -------
+        A newly created VRaster
+        """
         step = VRasterStep(VRTDataset.from_file(filepath), name="load_file")
 
         return cls(steps=[step])
 
     def save_vrt(self, filepath: str | Path) -> list[Path]:
+        """
+        Save the VRaster as a VRT or a stack of VRTs.
+
+        If the VRaster is nested (depends on more than one VRTDataset), all dependents will be saved too.
+
+        Parameters
+        ----------
+        filepath
+            The filepath to save the VRT. Multiple VRTs may be saved with suffixes.
+
+        Returns
+        -------
+        A list of filepaths that were created (multiple in case of a nested VRaster).
+        """
         if self.last.is_nested():
             return self.last.save_vrt_nested(filepath)
         else:
@@ -73,6 +113,7 @@ class VRaster:
             return [filepath]
 
     def _check_compatibility(self, other: "VRaster") -> str | None:
+        """Check if this VRaster is compatible with another VRaster."""
         if self.crs != other.crs:
             return f"CRS is different: {self.crs} != {other.crs}"
 
@@ -120,7 +161,26 @@ class VRaster:
         masked: bool = False,
         **kwargs,
     ) -> np.ndarray | np.ma.masked_array:
+        """
+        Read the contents of a VRaster into memory.
 
+        Parameters
+        ----------
+        band
+            A band index or a list of indices to load. Defaults to all bands.
+        out
+            Optional: The destination array to read to.
+        window
+            Optional: Read only a part of the VRaster (see the rasterio Window documentation)
+        masked
+            Return a masked array where all nodata values are masked.
+        **kwargs
+            Optional keyword arguments to supply the rio.DatasetReader.read method.
+
+        Returns
+        -------
+        A numpy array of shape (bands, height, width) or a numpy masked_array
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             filepath = self.last.to_tempfiles(temp_dir)[1]
 
@@ -218,7 +278,19 @@ class VRaster:
                 callback=callback,
             )
 
-    def add(self, other: int | float) -> "VRaster":
+    def add(self, other: int | float | "VRaster") -> "VRaster":
+        """
+        Perform addition on the VRaster
+
+        Parameters
+        ----------
+        other
+            A constant value or another VRaster to add.
+
+        Returns
+        -------
+        A new VRaster
+        """
         new_vraster = self.copy()
         new = new_vraster.last.copy()
 
@@ -281,6 +353,18 @@ class VRaster:
         return self.__add__(other)
 
     def multiply(self, other: int | float | "VRaster") -> "VRaster":
+        """
+        Perform multiplication on the VRaster
+
+        Parameters
+        ----------
+        other
+            A constant value or another VRaster to multiply.
+
+        Returns
+        -------
+        A new VRaster
+        """
         new_vraster = self.copy()
 
         new = new_vraster.last.copy()
@@ -359,6 +443,38 @@ class VRaster:
         resampling: Resampling | str = "bilinear",
         multithread: bool = False,
     ):
+        """
+        Warp the VRaster to new bounds, resolutions and/or coordinate systems.
+
+        This wraps the functionality of gdal.Warp
+
+        Parameters
+        ----------
+        reference
+            Optional: A reference VRaster to get the CRS, transform and shape from.
+            Note: It silently overrides the `shape`, `crs` and `transform` arguments.
+            If only parts of the reference parameters should be used, supply them directly instead (e.g. VRaster.crs). 
+        crs
+            The target coordinate reference system (CRS).
+            If an integer is given, it's parsed as an EPSG code (e.g. 4326 -> WGS84).
+        res
+            The target resolution in georeferenced units. If only one value is given, it is used for both axes.
+        shape
+            The target shape of the VRaster in pixels as (height, width).
+        bounds
+            The target corner bounds of the VRaster. If a list is given, it's parsed as [xmin, ymin, xmax, ymax]
+        transform
+            The target affine transform of the VRaster.
+        resampling
+            The target resampling algorithm, e.g. "bilinear" or "cubic_spline".
+            See rio.warp.Resampling for all available algorithms.
+        multithread
+            Use multithreading for the warp operation.
+
+        Returns
+        -------
+        A new VRaster
+        """
         new_vraster = self.copy()
 
         warp_kwargs = {
@@ -403,6 +519,18 @@ class VRaster:
         return new_vraster
 
     def replace_nodata(self, value: int | float):
+        """
+        Replace all nodata pixels with the given value.
+
+        Parameters
+        ----------
+        value
+            The value to replace nodata with
+
+        Returns
+        -------
+        A new VRaster
+        """
         new_vraster = self.copy()
         new = new_vraster.last.copy()
 
@@ -417,6 +545,13 @@ class VRaster:
         return new_vraster
 
     def inverse(self) -> "VRaster":
+        """
+        Invert the VRaster (1 / x)
+
+        Returns
+        -------
+        A new VRaster.
+        """
         new_vraster = self.copy()
         new = new_vraster.last.copy()
         for i, band in enumerate(new.raster_bands):
@@ -430,6 +565,18 @@ class VRaster:
         return new_vraster
 
     def divide(self, other: int | float | "VRaster") -> "VRaster":
+        """
+        Perform division on the VRaster
+
+        Parameters
+        ----------
+        other
+            A constant value or another VRaster to divide.
+
+        Returns
+        -------
+        A new VRaster.
+        """
         if isinstance(other, VRaster):
             new_vraster = self.copy()
             new = new_vraster.last.copy()
@@ -473,6 +620,18 @@ class VRaster:
         return self.__div__(other)
 
     def subtract(self, other: int | float | "VRaster") -> "VRaster":
+        """
+        Perform subtraction on the VRaster
+
+        Parameters
+        ----------
+        other
+            A constant value or another VRaster to subtract.
+
+        Returns
+        -------
+        A new VRaster
+        """
         if isinstance(other, VRaster):
             negative = other.multiply(-1)
             new = self.add(negative)
@@ -519,8 +678,43 @@ class VRaster:
     def last(self):
         return self.steps[-1].dataset
 
-    def sample(self, x_coord: float, y_coord: float, band: int | list[int] = 1, masked: bool = False):
+    @overload
+    def sample(self, x_coord: float, y_coord: float, band: int, masked: bool) -> int | float:... 
 
+    @overload
+    def sample(self, x_coord: float, y_coord: float, band: list[int], masked: Literal[True]) -> np.ma.masked_array:... 
+
+    @overload
+    def sample(self, x_coord: float, y_coord: float, band: list[int], masked: Literal[False]) -> np.ndarray:... 
+
+    @overload
+    def sample(self, x_coord: Iterable[float], y_coord: Iterable[float], band: int | list[int], masked: Literal[False]) -> np.ndarray:... 
+
+    @overload
+    def sample(self, x_coord: Iterable[float], y_coord: Iterable[float], band: int | list[int], masked: Literal[True]) -> np.ma.masked_array:... 
+
+    def sample(self, x_coord: float | Iterable[float], y_coord: float | Iterable[float], band: int | list[int] = 1, masked: bool = False) -> int | float | np.ndarray | np.ma.masked_array:
+        """
+        Sample values at the given georeferenced coordinates of a VRaster.
+
+        Parameters
+        ----------
+        x_coord
+            The x (easting/longitude) coordinate(s) to sample
+        y_coord
+            The x (northing/latitude) coordinate(s) to sample
+        band
+            The band(s) to sample from. Defaults to the first.
+        masked
+            Return a masked array with nodata values masked out.
+
+        Returns
+        -------
+        If one coordinate and one band:
+            One sampled value
+        If multiple coordinates and/or multiple bands:
+            An array of coordinates
+        """
         if self.last.is_nested():
             with tempfile.TemporaryDirectory(prefix="variete") as temp_dir:
                 return load_vrt(self.last.to_tempfiles(temp_dir=temp_dir)[1]).sample(
@@ -529,13 +723,62 @@ class VRaster:
 
         return self.steps[-1].dataset.sample(x_coord=x_coord, y_coord=y_coord, band=band, masked=masked)
 
-    def sample_rowcol(self, row: int, col: int, band: int | list[int] = 1, masked: bool = False):
+    @overload
+    def sample_rowcol(self, row: float, col: float, band: int, masked: bool) -> int | float:
+
+    @overload
+    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[True]) -> np.ma.masked_array:
+
+    @overload
+    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[False]) -> np.ndarray:
+
+    @overload
+    def sample_rowcol(self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[True]) -> np.ma.masked_array:
+
+    @overload
+    def sample_rowcol(self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[False]) -> np.ndarray:
+
+    def sample_rowcol(self, row: float | Iterable[float], col: float | Iterable[float], band: int | list[int] = 1, masked: bool = False) -> int | float | np.ndarray | np.ma.masked_array:
+        """
+        Sample values at the given row(s) and column(s) of a VRaster.
+
+        Parameters
+        ----------
+        row
+            The row(s) to sample.
+        y_coord
+            The column(s) to sample.
+        band
+            The band(s) to sample from. Defaults to the first.
+        masked
+            Return a masked array with nodata values masked out.
+
+        Returns
+        -------
+        If one coordinate and one band:
+            One sampled value
+        If multiple coordinates and/or multiple bands:
+            An array of coordinates
+        """
         x_coord, y_coord = rio.transform.xy(self.transform, row, col)
         return self.sample(x_coord, y_coord, band=band, masked=masked)
 
 
 def load(filepath: str | Path, nodata_to_nan: bool = True) -> VRaster:
+    """
+    Load a VRaster from a file.
 
+    Parameters
+    ----------
+    filepath
+        The path to a GDAL-readable dataset.
+    nodata_to_nan
+        Whether to convert nodata values to np.nan on load
+
+    Returns
+    -------
+    A new VRaster
+    """
     vraster = VRaster.load_file(filepath)
 
     if nodata_to_nan:
