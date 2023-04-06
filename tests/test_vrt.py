@@ -16,6 +16,7 @@ def make_test_raster(
     nodata: float = -9999.0,
     mean_val: int | float | None = None,
     assign_values: np.ndarray | None = None,
+    dtype: str = "float32",
 ):
     crs = rio.crs.CRS.from_epsg(32633)
     transform = rio.transform.from_origin(5e5, 8.7e6, 10, 10)
@@ -28,7 +29,7 @@ def make_test_raster(
                 np.sin(np.linspace(0, np.pi * 2, 100)) * 5,
                 np.sin(np.linspace(0, np.pi / 2, 50)) * 10,
             )
-        ).astype("float32")
+        ).astype(dtype)
 
         if mean_val is not None:
             data += mean_val - data.mean()
@@ -38,7 +39,7 @@ def make_test_raster(
         "w",
         "GTiff",
         width=data.shape[1],
-        dtype="float32",
+        dtype=dtype,
         height=data.shape[0],
         count=1,
         crs=crs,

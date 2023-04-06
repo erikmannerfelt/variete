@@ -362,11 +362,9 @@ def test_raster_warp():
         test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
         make_test_raster(test_raster_path_b, assign_values=four_arr)
 
-
         vrst_a = VRaster.load_file(test_raster_path_a)
         vrst_a_warp = VRaster.load_file(test_raster_path_a_warp)
         vrst_b = VRaster.load_file(test_raster_path_b)
-
 
         assert vrst_a_warp.crs == raster_a_warp_params["crs"]
         assert vrst_a.transform == vrst_b.transform
@@ -380,5 +378,54 @@ def test_raster_warp():
 
         for warped in [vrst_a_warp_inverse, vrst_a_warp_inverse_b]:
             assert vrst_a._check_compatibility(warped) is None
-            assert np.nanmedian(np.abs(warped.read(1) - vrst_a.read(1))) < 0.1 
+            assert np.nanmedian(np.abs(warped.read(1) - vrst_a.read(1))) < 0.1
 
+
+def test_write():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        _raster_a_params = make_test_raster(test_raster_path_a)
+        vrst_a = VRaster.load_file(test_raster_path_a)
+
+        out_filepath = test_raster_path_a.with_stem("written")
+
+        # Validate that writing doesn't raise an error
+        vrst_a.write(out_filepath)
+
+        # The parent directory will not exist
+        with pytest.raises(AssertionError, match=".*parent directory does not exist.*"):
+            vrst_a.write("a/ab/c/d/e/f/g/h/i/j/k/l/")
+
+        # The progress=True flag and a custom callback cannot be provided at the same time.
+        with pytest.raises(ValueError, match="'progress' needs to be False if.*"):
+            vrst_a.write(out_filepath, progress=True, callback=lambda *_: ...)
+
+
+@pytest.mark.parametrize("compress", ["deflate", "lzw", None])
+@pytest.mark.parametrize("dtype", ["uint8", "uint16", "int16", "int32", "float32", "float64"])
+@pytest.mark.parametrize("tiled", [True, False])
+def test_write_scenarios(compress: str | None, dtype: str, tiled: bool):
+    two_arr = np.ones((50, 100), dtype=dtype) + 1
+    four_arr = two_arr.copy() + 2
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        raster_a_params = make_test_raster(test_raster_path_a, assign_values=two_arr, nodata=None, dtype=dtype)
+        vrst_a = VRaster.load_file(test_raster_path_a)
+
+        out_filepath = test_raster_path_a.with_stem("written")
+
+        vrst_a.write(out_filepath, compress=compress, tiled=tiled)
+        with rio.open(out_filepath) as raster:
+            assert raster.dtypes[0] == four_arr.dtype
+            assert raster.transform == raster_a_params["transform"]
+            assert raster.crs == raster_a_params["crs"]
+
+            assert raster.profile["tiled"] == tiled
+
+            if compress is None:
+                assert "compress" not in raster.profile
+            else:
+                assert raster.profile["compress"] == compress
+
+            assert np.equal(raster_a_params["data"], raster.read(1)).all()

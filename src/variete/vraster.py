@@ -9,7 +9,8 @@ from rasterio.crs import CRS
 from rasterio.windows import Window
 from rasterio.warp import Resampling
 import numpy as np
-from typing import overload, Literal
+from typing import overload, Literal, Callable, Any
+from osgeo import gdal
 
 from variete.vrt.vrt import VRTDataset, AnyVRTDataset, load_vrt, vrt_warp, build_vrt
 from variete.vrt.raster_bands import VRTDerivedRasterBand
@@ -17,6 +18,30 @@ from variete.vrt.pixel_functions import ScalePixelFunction
 from variete.vrt import pixel_functions
 from variete.vrt.sources import SimpleSource
 from variete import misc
+
+# tqdm is an optional dependency and will simply raise a custom exception if it's explicitly asked for.
+try:
+    from tqdm import tqdm
+
+    _has_tqdm = True
+except ImportError:
+    _has_tqdm = False
+    # For code simplicity, a dummy tqdm class is ironically needed. This makes it so that a tqdm context can
+    # always be entered (even though it doesn't do anything if tqdm is not installed)
+    class tqdm:
+        def __init__(
+            self, total: float, disable: bool = False, smoothing: float | None = None, desc: str | None = None
+        ):
+            ...
+
+        def update(self, value: Any):
+            ...
+
+        def __enter__(self):
+            ...
+
+        def __exit__(self):
+            ...
 
 
 class VRasterStep:
@@ -101,6 +126,97 @@ class VRaster:
 
             with rio.open(filepath) as raster:
                 return raster.read(band, out=out, masked=masked, window=window, **kwargs)
+
+    def write(
+        self,
+        filepath: Path | str,
+        format: str | None = None,
+        tiled: bool | None = None,
+        compress: str = "deflate",
+        predictor: Literal[1] | Literal[2] | Literal[3] | None = None,
+        zlevel: int | str | None = None,
+        creation_options: dict[str, str] | None = None,
+        progress: bool = False,
+        callback: Callable[float, Any, Any] | None = None,
+    ) -> None:
+        """
+        Write the VRaster to a file.
+
+        Parameters
+        ----------
+        filepath
+            The output filepath to write the file.
+        format
+            The output format (e.g. "GTiff"). If not given, the format is inferred from the filename.
+        tiled
+            Whether to write the blocks in tiles (True) or in strips (False)
+        compress
+            What compression algorithm to use.
+        predictor
+            Which compression predictor to use (only valid in some compression schemes).
+        zlevel
+            The level of compression to use. For deflate, valid numbers range between 1 and 12
+        creation_options
+            Other creation options to provide to GDAL as a {key: value} dictionary
+        progress
+            Whether to show a tqdm progress bar. tqdm needs to be installed for this to work.
+        callback
+            A callback function for the writer that takes three positional arguments.
+            The first argument is the progress, ranging from 0-1.
+
+        Raises
+        ------
+        AssertionError
+            If any requirement for file creation is not filled.
+        ValueError
+            If the provided arguments are incompatible.
+        """
+        filepath = Path(filepath)
+
+        if not filepath.parent.is_dir():
+            raise AssertionError("Filepath parent directory does not exist")
+
+        if progress and callback is not None:
+            raise ValueError("'progress' needs to be False if 'callback' is used")
+
+        if progress and not _has_tqdm:
+            raise ValueError("tqdm is required for 'progress=True'. For pip, use 'pip install tqdm'.")
+
+        if creation_options is None:
+            creation_options = {}
+
+        lowercase_keys = [key.lower() for key in creation_options]
+
+        for key, value in [("COMPRESS", compress), ("TILED", tiled), ("PREDICTOR", predictor), ("ZLEVEL", zlevel)]:
+            if key.lower() in lowercase_keys or value is None:
+                continue
+
+            creation_options[key] = value
+
+        # Always initialize a tqdm context, because it's easier with the context manager..
+        with tempfile.TemporaryDirectory() as temp_dir, tqdm(
+            total=100, disable=(not progress), smoothing=0.1, desc=f"Writing {filepath.name}"
+        ) as progress_bar:
+            _, vrt_path = self.last.to_tempfiles(temp_dir=temp_dir)
+
+            if progress:
+                # This callback function will scale 0-1 to 0-100 and only show integer increments.
+                prev = 0.0
+
+                def callback(value, *_):
+                    nonlocal prev
+                    new_value = value * 100.0
+                    if int(new_value) > int(prev):
+                        progress_bar.update(int(new_value - prev))
+                    prev += new_value
+
+            gdal.Translate(
+                str(filepath),
+                str(vrt_path),
+                format=format,
+                creationOptions=[f"{k}={v}" for k, v in creation_options.items()],
+                callback=callback,
+            )
 
     def add(self, other: int | float) -> "VRaster":
         new_vraster = self.copy()

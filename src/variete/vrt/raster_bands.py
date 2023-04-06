@@ -35,7 +35,7 @@ class VRTRasterBand:
         )
 
     def to_etree(self):
-        band_xml = ET.Element("VRTRasterBand", {"dataType": self.dtype.capitalize(), "band": str(self.band)})
+        band_xml = ET.Element("VRTRasterBand", {"dataType": misc.dtype_numpy_to_gdal(self.dtype), "band": str(self.band)})
 
         for key, gdal_key in [("nodata", "NoDataValue"), ("offset", "Offset"), ("scale", "Scale")]:
             if (value := getattr(self, key)) is not None:
