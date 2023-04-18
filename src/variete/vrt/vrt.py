@@ -1,4 +1,4 @@
-from pyproj import CRS
+from rasterio import CRS
 from pathlib import Path
 import rasterio as rio
 from affine import Affine
