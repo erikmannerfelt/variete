@@ -45,7 +45,7 @@ except ImportError:
         def __enter__(self):
             ...
 
-        def __exit__(self):
+        def __exit__(self, *_):
             ...
 
 
