@@ -724,19 +724,19 @@ class VRaster:
         return self.steps[-1].dataset.sample(x_coord=x_coord, y_coord=y_coord, band=band, masked=masked)
 
     @overload
-    def sample_rowcol(self, row: float, col: float, band: int, masked: bool) -> int | float:
+    def sample_rowcol(self, row: float, col: float, band: int, masked: bool) -> int | float: ...
 
     @overload
-    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[True]) -> np.ma.masked_array:
+    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[True]) -> np.ma.masked_array: ...
 
     @overload
-    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[False]) -> np.ndarray:
+    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[False]) -> np.ndarray: ...
 
     @overload
-    def sample_rowcol(self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[True]) -> np.ma.masked_array:
+    def sample_rowcol(self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[True]) -> np.ma.masked_array: ...
 
     @overload
-    def sample_rowcol(self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[False]) -> np.ndarray:
+    def sample_rowcol(self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[False]) -> np.ndarray: ...
 
     def sample_rowcol(self, row: float | Iterable[float], col: float | Iterable[float], band: int | list[int] = 1, masked: bool = False) -> int | float | np.ndarray | np.ma.masked_array:
         """

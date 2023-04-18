@@ -1,3 +1,22 @@
+[project]
+name = "variete"
+version = "0.1.0"
+description = "Making lazily evaluated raster operations simple."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE", content-type = "text/markdown"}
+keywords = ["lazy", "gdal", "rasterio", "raster", "virtual", "geospatial", "spatial", "operation", "dem"]
+
+authors = [
+	{name = "Erik Mannerfelt", email="33550973+erikmannerfelt@users.noreply.github.com"},
+]
+
+dependencies = ["rasterio", "gdal>=3.2"]
+
+[project.urls]
+home = "https://pypi.org/project/variete/"
+repository = "https://github.com/erikmannerfelt/variete"
+
 [tool.pytest.ini_options]
 pythonpath = [
   "src"

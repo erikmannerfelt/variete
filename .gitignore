@@ -2,3 +2,7 @@
 stack.vrt
 *.tif
 *.vrt
+build/
+dist/
+venv/
+/src/variete.egg-info/

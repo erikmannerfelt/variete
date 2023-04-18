@@ -93,17 +93,17 @@ points["raster_value"] = raster.sample(points["easting"], points["northing"])
 
 ## Installation
 `variete` only depends on [rasterio](https://github.com/rasterio/rasterio) and its sub-dependencies.
-If `rasterio` is installed, `variete` can be installed with one of the following:
+If `rasterio` is installed and it works [(see their installation page)](https://rasterio.readthedocs.io/en/stable/installation.html), `variete` can be installed with one of the following:
+
+```bash
+pip install variete
+```
+
+or, for the latest main branch commit:
 
 ```bash
 pip install git+https://github.com/erikmannerfelt/variete.git
 ```
-### Requirements
-
-- `gdal`
-- `numpy`
-- `rasterio`
-
 
 ## Comparison to other packages
 ### geoutils
@@ -121,7 +121,7 @@ Its API can however be daunting, and its functionality rather shines complex use
 Most modern geospatial packages use [rasterio](https://github.com/rasterio/rasterio) for geospatial raster operations.
 Its goal is to make GDAL functionality easier to use, and it adds many useful tools and error messages along the way.
 Indeed, `rasterio` even has a [VRT module](https://rasterio.readthedocs.io/en/latest/api/rasterio.vrt.html) which can handle the (very limited) construction of simple VRTs.
-Code complexity is however often a recurring problem with `rasterio`, as even just one operation (like reprojecting, reading or writing) can easily be 5--10 lines of code.
+Code complexity is however often a recurring problem with `rasterio`, as even just one operation (like reprojecting, reading or writing) can easily be 5–10 lines of code.
 Most of the functionality is also eager, meaning OOM issues and large intermediate files are almost granted.
 `variete` uses the safety net that `rasterio` provides for disk-based operations (reading/writing/sampling), while retaining the simplicity that is inspired by `geoutils`.
 Most of the properties of a `variete.VRaster` are identical to a `rio.DatasetReader` class (like `transform`, `crs`, `shape`), so switching between the two packages should be trivial, and many use-cases require using both.
