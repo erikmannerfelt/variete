@@ -1,23 +1,26 @@
-import variete.vrt
-from variete.vrt import raster_bands, pixel_functions
+import os
 import tempfile
+import warnings
 from pathlib import Path
+from typing import Any, Sequence
+
+import numpy as np
+import numpy.typing as npt
+import pytest
 import rasterio as rio
 import rasterio.warp
-import numpy as np
-import warnings
-import os
-import pytest
-from typing import Sequence
+
+import variete.vrt
+from variete.vrt import pixel_functions, raster_bands
 
 
 def make_test_raster(
     filepath: Path,
-    nodata: float = -9999.0,
+    nodata: float | None = -9999.0,
     mean_val: int | float | None = None,
-    assign_values: np.ndarray | None = None,
+    assign_values: npt.NDArray[Any] | None = None,
     dtype: str = "float32",
-):
+) -> dict[str, Any]:
     crs = rio.crs.CRS.from_epsg(32633)
     transform = rio.transform.from_origin(5e5, 8.7e6, 10, 10)
 
@@ -51,7 +54,7 @@ def make_test_raster(
     return {"crs": crs, "transform": transform, "data": data}
 
 
-def test_create_vrt():
+def test_create_vrt() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster = Path(temp_dir).joinpath("test.tif")
         raster = make_test_raster(test_raster)
@@ -78,8 +81,7 @@ def test_create_vrt():
             assert orig_lines[i] == loaded_lines[i]
 
 
-def test_multiple_vrt():
-
+def test_multiple_vrt() -> None:
     with tempfile.TemporaryDirectory() as temp_dir_str:
         temp_dir = Path(temp_dir_str)
 
@@ -146,8 +148,7 @@ def test_multiple_vrt():
         assert len(vrt_separate.raster_bands[0].sources) == 1
 
 
-def test_warped_vrt():
-
+def test_warped_vrt() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         make_test_raster(test_raster_path)
@@ -161,7 +162,7 @@ def test_warped_vrt():
             assert raster.nodata == -9999
 
 
-@pytest.mark.parametrize(
+@pytest.mark.parametrize(  # type: ignore
     "test_case",
     [
         {"dst_res": 5, "result": "pass"},
@@ -175,11 +176,11 @@ def test_warped_vrt():
             "result": "dst_transform and dst_bounds cannot be used at the same time.*",
         },
         {
-            "dst_transform": rio.transform.from_origin(5e5, 8.3e6, 10, 10), 
+            "dst_transform": rio.transform.from_origin(5e5, 8.3e6, 10, 10),
             "result": "dst_transform requires dst_shape.*",
         },
         {
-            "dst_transform": rio.transform.from_origin(5e5, 8.3e6, 10, 10), 
+            "dst_transform": rio.transform.from_origin(5e5, 8.3e6, 10, 10),
             "dst_shape": (100, 100),
             "dst_res": (5, 5),
             "result": "dst_transform and dst_res cannot be used at the same time.*",
@@ -191,7 +192,7 @@ def test_warped_vrt():
         },
     ],
 )
-def test_vrt_warp(test_case: dict[str, object]):
+def test_vrt_warp(test_case: dict[str, object]) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         raster_params = make_test_raster(test_raster_path, mean_val=3)
@@ -247,7 +248,7 @@ def test_vrt_warp(test_case: dict[str, object]):
                     assert raster.res == (test_case["dst_res"],) * 2
 
 
-def create_vrt():
+def create_vrt() -> tuple[dict[str, Any], variete.vrt.VRTDataset]:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         raster = make_test_raster(test_raster_path)
@@ -257,7 +258,7 @@ def create_vrt():
     return raster, vrt
 
 
-def test_with_open():
+def test_with_open() -> None:
     raster_params, vrt = create_vrt()
 
     with vrt.open_rio() as raster:
@@ -269,7 +270,7 @@ def test_with_open():
     assert isinstance(memfile, rio.MemoryFile)
 
 
-def test_load_vrt():
+def test_load_vrt() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         make_test_raster(test_raster_path)
@@ -295,7 +296,7 @@ def test_load_vrt():
             assert vrt0.transform == vrt1.transform
 
 
-def test_set_offset_scale():
+def test_set_offset_scale() -> None:
     warnings.simplefilter("error")
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
@@ -321,7 +322,7 @@ def test_set_offset_scale():
         assert np.sum((scale * raster_params["data"]) + offset) == np.sum(loaded_raster)
 
 
-def test_pixel_function():
+def test_pixel_function() -> None:
     warnings.simplefilter("error")
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -344,8 +345,7 @@ def test_pixel_function():
         assert np.round(np.nanmean((added_raster - constant) / raster_params["data"]), 4) == 2.0
 
 
-def test_copy():
-
+def test_copy() -> None:
     _, vrt_a = create_vrt()
 
     vrt_a_copy = vrt_a.copy()
@@ -357,7 +357,7 @@ def test_copy():
     assert vrt_a_copy.raster_bands[0].sources[0].source_filename != "f"
 
 
-def test_open_nested():
+def test_open_nested() -> None:
     warnings.simplefilter("error")
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
@@ -381,7 +381,7 @@ def test_open_nested():
         temp_dir2.cleanup()
 
 
-def test_to_tempfiles():
+def test_to_tempfiles() -> None:
     warnings.simplefilter("error")
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -411,7 +411,7 @@ def test_to_tempfiles():
         temp_dir2.cleanup()
 
 
-def test_sample():
+def test_sample() -> None:
     warnings.simplefilter("error")
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -428,8 +428,7 @@ def test_sample():
         assert sampled == raster_params["data"][0, 0]
 
 
-def test_main():
-
+def test_main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster = Path(temp_dir).joinpath("test.tif")
         make_test_raster(test_raster)

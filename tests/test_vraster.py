@@ -1,16 +1,17 @@
-import variete
-from variete.vraster import VRaster
 import tempfile
 from pathlib import Path
-import numpy as np
-import rasterio.warp
-import rasterio as rio
-import pytest
 
+import numpy as np
+import pytest
+import rasterio as rio
+import rasterio.warp
 from test_vrt import make_test_raster
 
+import variete
+from variete.vraster import VRaster
 
-def _print_nested(vraster: VRaster):
+
+def _print_nested(vraster: VRaster) -> None:
     """Print the content of all vrts in a rendered nested VRaster."""
     with tempfile.TemporaryDirectory() as temp_dir:
         vraster.last.to_tempfiles(temp_dir)
@@ -23,7 +24,7 @@ def _print_nested(vraster: VRaster):
             print("\n")
 
 
-def test_load_vraster():
+def test_load_vraster() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         raster_params = make_test_raster(test_raster_path)
@@ -41,7 +42,7 @@ def test_load_vraster():
         assert vrst3.steps[-1].name == vrst2.steps[-2].name
 
 
-def test_vraster_read():
+def test_vraster_read() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         raster_params = make_test_raster(test_raster_path)
@@ -56,7 +57,7 @@ def test_vraster_read():
         assert hasattr(vrst.read(masked=True), "mask")
 
 
-def test_constant_add_subtract():
+def test_constant_add_subtract() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         make_test_raster(test_raster_path)
@@ -83,7 +84,7 @@ def test_constant_add_subtract():
         assert vrst.sample_rowcol(0, 0) == vrst_subtracted.sample_rowcol(0, 0)
 
 
-def test_vraster_add_subtract():
+def test_vraster_add_subtract() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
         make_test_raster(test_raster_path_a, mean_val=2)
@@ -102,8 +103,7 @@ def test_vraster_add_subtract():
         assert vrst_subtracted.sample_rowcol(0, 0) == vrst_a.sample_rowcol(0, 0)
 
 
-def test_constant_multiply_divide():
-
+def test_constant_multiply_divide() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         make_test_raster(test_raster_path, mean_val=4)
@@ -132,7 +132,7 @@ def test_constant_multiply_divide():
         assert vrst.sample_rowcol(0, 0) == vrst_divided.sample_rowcol(0, 0)
 
 
-def test_vraster_multiply():
+def test_vraster_multiply() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
         make_test_raster(test_raster_path_a, mean_val=2)
@@ -147,7 +147,7 @@ def test_vraster_multiply():
         assert vrst_a.sample_rowcol(0, 0) * vrst_b.sample_rowcol(0, 0) == vrst_multiplied.sample_rowcol(0, 0)
 
 
-def test_vraster_inverse():
+def test_vraster_inverse() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         make_test_raster(test_raster_path, mean_val=2)
@@ -159,7 +159,7 @@ def test_vraster_inverse():
         assert 1 / vrst.sample_rowcol(0, 0) == vrst_inverse.sample_rowcol(0, 0)
 
 
-def test_vraster_divide():
+def test_vraster_divide() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
         make_test_raster(test_raster_path_a, mean_val=2)
@@ -174,7 +174,7 @@ def test_vraster_divide():
         assert vrst_a.sample_rowcol(0, 0) / vrst_b.sample_rowcol(0, 0) == vrst_divided.sample_rowcol(0, 0)
 
 
-def test_sample():
+def test_sample() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path = Path(temp_dir).joinpath("test.tif")
         raster_params = make_test_raster(test_raster_path)
@@ -201,7 +201,7 @@ def test_sample():
         )
 
 
-def test_save_vrt():
+def test_save_vrt() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
         make_test_raster(test_raster_path_a, mean_val=2)
@@ -227,17 +227,6 @@ def test_save_vrt():
         save_path = save_path.with_stem("test_added_save")
 
         vrst_multiplied.save_vrt(save_path)
-
-        # for path in sorted(list(save_path.parent.iterdir())):
-        #     if "test_added_save" not in path.name:
-        #         continue
-
-        #     print(str(path) + ":\n")
-        #     with open(path) as infile:
-        #         print(infile.read())
-
-        #     print("\n")
-
         loaded = VRaster.load_file(save_path)
 
         assert loaded.crs == vrst_a.crs
@@ -246,8 +235,7 @@ def test_save_vrt():
         assert loaded.sample_rowcol(0, 0) == vrst_multiplied.sample_rowcol(0, 0)
 
 
-def test_replace_nodata():
-
+def test_replace_nodata() -> None:
     nodata_data = np.ones((50, 100), dtype="float32")
     nodata_data[:5, :5] = -9999
 
@@ -289,8 +277,7 @@ def test_replace_nodata():
             assert vrst.sample_rowcol(25, 25) == expected_mid
 
 
-def test_overloading():
-
+def test_overloading() -> None:
     two_arr = np.ones((50, 100), dtype="float32") + 1
     four_arr = two_arr.copy() + 2
 
@@ -326,7 +313,7 @@ def test_overloading():
             assert vrst.sample_rowcol(0, 0) == expected, f"test {i} failed"
 
 
-def test_raster_warp():
+def test_raster_warp() -> None:
     two_arr = np.ones((50, 100), dtype="float32") + 1
     four_arr = two_arr.copy() + 2
 
@@ -381,10 +368,10 @@ def test_raster_warp():
             assert np.nanmedian(np.abs(warped.read(1) - vrst_a.read(1))) < 0.1
 
 
-def test_write():
+def test_write() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
-        _raster_a_params = make_test_raster(test_raster_path_a)
+        make_test_raster(test_raster_path_a)
         vrst_a = VRaster.load_file(test_raster_path_a)
 
         out_filepath = test_raster_path_a.with_stem("written")
@@ -401,10 +388,10 @@ def test_write():
             vrst_a.write(out_filepath, progress=True, callback=lambda *_: ...)
 
 
-@pytest.mark.parametrize("compress", ["deflate", "lzw", None])
-@pytest.mark.parametrize("dtype", ["uint8", "uint16", "int16", "int32", "float32", "float64"])
-@pytest.mark.parametrize("tiled", [True, False])
-def test_write_scenarios(compress: str | None, dtype: str, tiled: bool):
+@pytest.mark.parametrize("compress", ["deflate", "lzw", None])  # type: ignore
+@pytest.mark.parametrize("dtype", ["uint8", "uint16", "int16", "int32", "float32", "float64"])  # type: ignore
+@pytest.mark.parametrize("tiled", [True, False])  # type: ignore
+def test_write_scenarios(compress: str | None, dtype: str, tiled: bool) -> None:
     two_arr = np.ones((50, 100), dtype=dtype) + 1
     four_arr = two_arr.copy() + 2
 
