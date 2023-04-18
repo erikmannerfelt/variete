@@ -1,6 +1,7 @@
 """
 From rhugonnet in https://github.com/GlacioHack/xdem
 """
+from __future__ import annotations
 import argparse
 
 import yaml  # type: ignore
