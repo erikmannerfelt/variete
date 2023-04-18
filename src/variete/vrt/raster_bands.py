@@ -1,3 +1,4 @@
+from __future__ import annotations
 import xml.etree.ElementTree as ET
 from variete.vrt.sources import Source, source_from_etree
 from variete.vrt.pixel_functions import AnyPixelFunction, pixel_function_from_etree

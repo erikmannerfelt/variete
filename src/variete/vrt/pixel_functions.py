@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Literal
 from variete import misc
 import xml.etree.ElementTree as ET

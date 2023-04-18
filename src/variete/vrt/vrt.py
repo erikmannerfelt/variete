@@ -1,3 +1,4 @@
+from __future__ import annotations
 from rasterio import CRS
 from pathlib import Path
 import rasterio as rio
