@@ -1,0 +1,100 @@
+# Build and test the package
+# Based on the xdem python-package.yml
+
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: ${{ matrix.os }}, python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
+        python-version: ["3.8", "3.10"]
+
+    # Run all shells using bash (including Windows)
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+    - uses: actions/checkout@v2
+
+    # We initiate the environment empty, and check if a key for this environment doesn't already exist in the cache
+    - name: Initiate empty environment
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        miniforge-variant: Mambaforge
+        miniforge-version: latest
+        auto-update-conda: true
+        use-mamba: true
+        channel-priority: strict
+        activate-environment: variete-dev
+
+    - name: Get month for resetting cache
+      id: get-date
+      run: echo "::set-output name=month::$(/bin/date -u '+%Y%m')"
+      shell: bash
+
+    - name: Cache conda env
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.CONDA }}/envs
+        key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ steps.get-date.outputs.month }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
+      env:
+        CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
+      id: cache
+
+    # The trick below is necessary because the generic environment file does not specify a Python version, and only
+    # "conda env update" can be used to update with an environment file, which upgrades the Python version
+    - name: Install base environment with a fixed Python version
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        mamba install pyyaml python=${{ matrix.python-version }}
+        mamba env update -f dev-environment.yml
+
+    - name: Install project
+      run: pip install -e . --no-dependencies
+
+
+    # This steps allows us to check the "import variete" with the base environment provided to users, before adding
+    # development-specific dependencies by differencing the env and dev-env yml files
+    - name: Check import works with base environment
+      run: |
+        # We unset the PROJ_DATA environment variable to make PROJ work on Windows
+        unset PROJ_DATA
+        python -c "import variete"
+
+    # This time, the trick below is necessary because: 1/ "conda update" does not support a file -f as argument
+    # and also 2/ "conda env update" does not support --freeze-installed or --no-update-deps
+    #- name: Update environment with development packages if cache does not exist
+    #  if: steps.cache.outputs.cache-hit != 'true'
+    #  run: |
+    #    # We unset the PROJ_DATA environment variable to make PROJ work on Windows
+    #    unset PROJ_DATA
+    #    pkgs_conda_dev=`python -c "import xdem.misc; xdem.misc.diff_environment_yml('#environment.yml', 'dev-environment.yml', 'conda')"`
+    #    pkgs_pip_dev=`python -c "import xdem.misc; xdem.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
+        # mamba install $pkgs_conda_dev --freeze-installed
+        # if [[ "$pkgs_pip_dev" != "None" ]]; then
+        #   pip install $pkgs_pip_dev
+        # fi
+
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Test with pytest
+      run: |
+        # We unset the PROJ_DATA environment variable to make PROJ work on Windows
+        unset PROJ_DATA
+        pytest -ra

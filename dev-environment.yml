@@ -1,0 +1,9 @@
+name: variete-dev
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.8
+  - rasterio
+
+  - pytest
+  - flake8
