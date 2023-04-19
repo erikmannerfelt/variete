@@ -149,6 +149,17 @@ class VRaster:
     ) -> npt.NDarray[Any]:
         ...
 
+    @overload
+    def read(
+        self,
+        band: int | list[int] | None = None,
+        out: npt.ArrayLike | None = None,
+        window: Window | None = None,
+        masked: bool = False,
+        **kwargs: dict[str, Any],
+    ) -> npt.NDArray[Any] | np.ma.MaskedArray[Any, Any]:
+        ...
+
     def read(
         self,
         band: int | list[int] | None = None,
@@ -188,12 +199,12 @@ class VRaster:
         filepath: Path | str,
         format: str | None = None,
         tiled: bool | None = None,
-        compress: str = "deflate",
+        compress: str | None = "deflate",
         predictor: Literal[1] | Literal[2] | Literal[3] | None = None,
         zlevel: int | str | None = None,
         creation_options: dict[str, str | int | bool] | None = None,
         progress: bool = False,
-        callback: Callable[[float, Any, Any], None] | None = None,
+        callback: Callable[[float, Any, Any], Any] | None = None,
     ) -> None:
         """
         Write the VRaster to a file.
@@ -666,6 +677,16 @@ class VRaster:
     def sample(self, x_coord: float, y_coord: float, band: int, masked: bool) -> int | float:
         ...
 
+    @overload
+    def sample(
+        self,
+        x_coord: float | Iterable[float],
+        y_coord: float | Iterable[float],
+        band: int | list[int] = 1,
+        masked: bool = False,
+    ) -> int | float | npt.NDArray[Any] | np.ma.MaskedArray[Any, Any]:
+        ...
+
     def sample(
         self,
         x_coord: float | Iterable[float],
@@ -726,6 +747,16 @@ class VRaster:
     def sample_rowcol(
         self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[False]
     ) -> npt.NDArray[Any]:
+        ...
+
+    @overload
+    def sample_rowcol(
+        self,
+        row: float | Iterable[float],
+        col: float | Iterable[float],
+        band: int | list[int] = 1,
+        masked: bool = False,
+    ) -> int | float | npt.NDArray[Any] | np.ma.MaskedArray[Any, Any]:
         ...
 
     def sample_rowcol(

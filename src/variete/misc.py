@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from typing import Any, overload, Literal
+from typing import Any, Literal, overload
 
 from rasterio import CRS, Affine
 from rasterio.warp import Resampling
@@ -72,13 +72,18 @@ def new_element(tag: str, text: str | None = None, attributes: dict[str, str] | 
 
 @overload
 def find_element(
-    parent: ET.Element, key: str | list[str], text: Literal["both"], default: str | None = None,
+    parent: ET.Element,
+    key: str | list[str],
+    text: Literal["both"],
+    default: str | None = None,
 ) -> tuple[ET.Element, str]:
     ...
 
 
 @overload
-def find_element(parent: ET.Element, key: str | list[str], text: Literal[False] = False, default: str | None = None) -> ET.Element:
+def find_element(
+    parent: ET.Element, key: str | list[str], text: Literal[False] = False, default: str | None = None
+) -> ET.Element:
     ...
 
 
@@ -112,9 +117,8 @@ def find_element(
         if text == "both":
             return latest, content
         return content
-        
-    return latest
 
+    return latest
 
 
 def transform_to_gdal(transform: Affine) -> str:

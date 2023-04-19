@@ -209,10 +209,10 @@ def test_vrt_warp(test_case: dict[str, object]) -> None:
 
         if result != "pass":
             with pytest.raises(ValueError, match=result):
-                variete.vrt.vrt.vrt_warp(test_vrt_path, test_raster_path, **test_case)
+                variete.vrt.vrt.vrt_warp(test_vrt_path, test_raster_path, **test_case)  # type: ignore
             return
         else:
-            variete.vrt.vrt.vrt_warp(test_vrt_path, test_raster_path, **test_case)
+            variete.vrt.vrt.vrt_warp(test_vrt_path, test_raster_path, **test_case)  # type: ignore
 
         variete.vrt.vrt.vrt_warp(
             inverted_vrt_path,

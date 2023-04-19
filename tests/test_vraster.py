@@ -197,7 +197,7 @@ def test_sample() -> None:
         assert lower_right_val == vrst.sample_rowcol(*lr_rowcol)
 
         assert np.array_equal(
-            vrst.sample_rowcol([0, lr_rowcol[0]], [0, lr_rowcol[1]]), [upper_left_val, lower_right_val]
+            vrst.sample_rowcol([0, lr_rowcol[0]], [0, lr_rowcol[1]]), [float(upper_left_val), float(lower_right_val)]
         )
 
 

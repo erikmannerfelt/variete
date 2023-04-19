@@ -1,4 +1,4 @@
-# variete — Making lazily evaluated raster operations simple 
+# variete — Making lazily evaluated raster operations simple
 The [GDAL](https://gdal.org) library leverages functionality that is used in most (if not all) modern geospatial software.
 Most operations in GDAL are eager, i.e. they are run sequentially and produce an output directly.
 The GDAL Virtual Format (VRT) allows for lazy evaluation of operations, meaning only what is requested is actually calculated, instead of the whole raster at once.
@@ -45,7 +45,7 @@ Since VRT is the main driver of `variete`, lazy outputs can be read by **any** G
 Some caveats inherent to VRTs, or inherent to lazy file-based evaluation in general, cannot be circumvented.
 For example:
 
-  - Arithmetic on virtual rasters only works with constants and other virtual rasters. It cannot be done with in-memory datasets such as numpy arrays. In this case, either the array needs to be saved on disk, or the virtual raster needs to be explicitly loaded into memory.  
+  - Arithmetic on virtual rasters only works with constants and other virtual rasters. It cannot be done with in-memory datasets such as numpy arrays. In this case, either the array needs to be saved on disk, or the virtual raster needs to be explicitly loaded into memory.
   - Nodata handling in the VRT framework is rudimentary; when subtracting two virtual rasters with nodata values, nodata is ignored. Therefore, `variete.load()` defaults to assigning all nodata values to `np.nan`, which circumvents.
 
 ## Examples
@@ -65,7 +65,7 @@ plt.plot(dhdt.read(1), cmap="RdBu", vmin=-2, vmax=2)
 plt.show()
 
 dhdt.write("dhdt_2000-2020.tif")
-``` 
+```
 
 Resampling between the DEMs (in case their spatial extents differ) is done on the fly using bilinear interpolation to the DEM on the left hand side (`dem_2020`).
 The exact parameters can be customized if needed.
@@ -135,11 +135,10 @@ Special emphasis is put on:
 - Bugfixes, testing and documentation improvements
 
 For new features that fall outside of the "`variete` as a VRT wrapper" scope, further discussion is needed.
-New functionality may better fit the scope of the related packages [geoutils](https://github.com/GlacioHack/geoutils) or [xdem](https://github.com/GlacioHack/xdem). 
+New functionality may better fit the scope of the related packages [geoutils](https://github.com/GlacioHack/geoutils) or [xdem](https://github.com/GlacioHack/xdem).
 
 ## Roadmap
 1. Aim for full VRT compatibility. Currently, only a subset of the VRT functionality is supported.
 2. Implement graph optimization. Many subsequent steps may possible to simplify to fewer steps, leading to fewer VRTs being active at a time. This will probably increase performance, and will make saving VRT stacks less of a file-explosion.
 3. Work toward maximum test and documentation coverage to make sure the core functionality is watertight.
 4. Improve inter-operability with `geoutils` and `xdem`. `variete.VRaster`s should be easy to convert to in-memory `geoutils.Raster`s, and vice versa.
-

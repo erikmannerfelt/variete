@@ -1,1 +1,1 @@
-from .vraster import VRaster, load
+from variete.vraster import VRaster, load  # noqa

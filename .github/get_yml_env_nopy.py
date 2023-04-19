@@ -2,6 +2,7 @@
 From rhugonnet in https://github.com/GlacioHack/xdem
 """
 from __future__ import annotations
+
 import argparse
 
 import yaml  # type: ignore
@@ -55,4 +56,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     environment_yml_nopy(fn_env=args.fn_env, print_dep=args.print_dep)
-
