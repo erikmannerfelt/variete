@@ -1,0 +1,14 @@
+rasterio
+gdal
+tqdm
+pytest
+flake8
+matplotlib
+sphinx-book-theme
+sphinx
+numpydoc
+myst-parser
+sphinxcontrib-programoutput
+sphinx_autodoc_typehints
+sphinx-gallery
+sphinx_design
