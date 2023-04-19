@@ -391,6 +391,8 @@ class VRTDataset:
 
 
 class WarpedVRTDataset(VRTDataset):
+    """A VRTDataset that specifies a GDAL warp operation."""
+
     shape: tuple[int, int]
     crs: CRS
     crs_mapping: str

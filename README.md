@@ -46,7 +46,7 @@ Some caveats inherent to VRTs, or inherent to lazy file-based evaluation in gene
 For example:
 
   - Arithmetic on virtual rasters only works with constants and other virtual rasters. It cannot be done with in-memory datasets such as numpy arrays. In this case, either the array needs to be saved on disk, or the virtual raster needs to be explicitly loaded into memory.
-  - Nodata handling in the VRT framework is rudimentary; when subtracting two virtual rasters with nodata values, nodata is ignored. Therefore, `variete.load()` defaults to assigning all nodata values to `np.nan`, which circumvents.
+  - Nodata handling in the VRT framework is rudimentary; when subtracting two virtual rasters with nodata values, nodata is ignored. Therefore, `variete.load()` defaults to assigning all nodata values to `np.nan`, which partly circumvents the problem.
 
 ## Examples
 

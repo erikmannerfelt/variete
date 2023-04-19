@@ -6,3 +6,4 @@ build/
 dist/
 venv/
 /src/variete.egg-info/
+gen_modules/

@@ -1,3 +1,6 @@
+"""
+Pixel functions that allow arithmetic and other complex operations.
+"""
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
