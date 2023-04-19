@@ -4,25 +4,28 @@ Definitions for the VRaster class.
 Most actual functionality is in the `vrt` module.
 """
 from __future__ import annotations
-from pathlib import Path
+
 import copy
 import tempfile
-import rasterio as rio
-from rasterio.coords import BoundingBox
-from rasterio.transform import Affine
-from rasterio.crs import CRS
-from rasterio.windows import Window
-from rasterio.warp import Resampling
-import numpy as np
-from typing import overload, Literal, Callable, Any, Iterable
-from osgeo import gdal
+from pathlib import Path
+from typing import Any, Callable, Iterable, Literal, overload
 
-from variete.vrt.vrt import VRTDataset, AnyVRTDataset, load_vrt, vrt_warp, build_vrt
-from variete.vrt.raster_bands import VRTDerivedRasterBand
-from variete.vrt.pixel_functions import ScalePixelFunction
-from variete.vrt import pixel_functions
-from variete.vrt.sources import SimpleSource
+import numpy as np
+import numpy.typing as npt
+import rasterio as rio
+from osgeo import gdal
+from rasterio.coords import BoundingBox
+from rasterio.crs import CRS
+from rasterio.transform import Affine
+from rasterio.warp import Resampling
+from rasterio.windows import Window
+
 from variete import misc
+from variete.vrt import pixel_functions
+from variete.vrt.pixel_functions import ScalePixelFunction
+from variete.vrt.raster_bands import VRTDerivedRasterBand
+from variete.vrt.sources import SimpleSource
+from variete.vrt.vrt import AnyVRTDataset, VRTDataset, build_vrt, load_vrt, vrt_warp
 
 # tqdm is an optional dependency and will simply raise a custom exception if it's explicitly asked for.
 try:
@@ -31,26 +34,28 @@ try:
     _has_tqdm = True
 except ImportError:
     _has_tqdm = False
+
     # For code simplicity, a dummy tqdm class is ironically needed. This makes it so that a tqdm context can
     # always be entered (even though it doesn't do anything if tqdm is not installed)
-    class tqdm:
+    class tqdm:  # type: ignore
         def __init__(
             self, total: float, disable: bool = False, smoothing: float | None = None, desc: str | None = None
-        ):
+        ) -> None:
             ...
 
-        def update(self, value: Any):
+        def update(self, value: Any) -> None:
             ...
 
-        def __enter__(self):
+        def __enter__(self) -> None:
             ...
 
-        def __exit__(self, *_):
+        def __exit__(self, *_: Any) -> None:
             ...
 
 
 class VRasterStep:
     """A VRTDataset and an associated name, for logging purposes."""
+
     dataset: AnyVRTDataset
     name: str
 
@@ -61,11 +66,12 @@ class VRasterStep:
 
 class VRaster:
     """
-    A "Virtual Raster" containing information on how to process a raster on disk.  
+    A "Virtual Raster" containing information on how to process a raster on disk.
 
     A VRaster has no data loaded in memory, other than the processing steps to take when evaluating.
     Evaluation is mainly done through the `VRaster.read()` or `VRaster.write()` functions.
     """
+
     # The steps list is a (largely) unordered list of steps and dependencies to the last (current) dataset
     # The last dataset (VRaster.steps[-1]) is always the current one, but no other step is required for evaluation.
     # All other steps are only to show the steps that were taken to get to the latest, and are all self-contained.
@@ -75,7 +81,7 @@ class VRaster:
         self.steps = steps or []
 
     @classmethod
-    def load_file(cls, filepath: str | Path):
+    def load_file(cls, filepath: str | Path) -> VRaster:
         """
         Load a VRaster from a file.
 
@@ -110,57 +116,47 @@ class VRaster:
             return self.last.save_vrt_nested(filepath)
         else:
             self.last.save_vrt(filepath)
-            return [filepath]
+            return [Path(filepath)]
 
-    def _check_compatibility(self, other: "VRaster") -> str | None:
+    def _check_compatibility(self, other: VRaster) -> str | None:
         """Check if this VRaster is compatible with another VRaster."""
         if self.crs != other.crs:
             return f"CRS is different: {self.crs} != {other.crs}"
 
         if self.n_bands != other.n_bands:
             return f"Number of bands must be the same: {self.n_bands} != {other.n_bands}"
+        return None
 
     @overload
     def read(
         self,
         band: int | list[int] | None,
-        out: np.ndarray | np.ma.masked_array | None,
+        out: npt.ArrayLike | None,
         window: Window | None,
         masked: Literal[True],
-        **kwargs,
-    ) -> np.ma.masked_array:
+        **kwargs: dict[str, Any],
+    ) -> np.ma.MaskedArray[Any, Any]:
         ...
 
     @overload
     def read(
         self,
         band: int | list[int] | None,
-        out: np.ndarray | np.ma.masked_array | None,
+        out: npt.ArrayLike | None,
         window: Window | None,
         masked: Literal[False],
-        **kwargs,
-    ) -> np.ndarray:
-        ...
-
-    @overload
-    def read(
-        self,
-        band: int | list[int] | None,
-        out: np.ndarray | np.ma.masked_array | None,
-        window: Window | None,
-        masked: Literal[False],
-        **kwargs,
-    ) -> np.ndarray:
+        **kwargs: dict[str, Any],
+    ) -> npt.NDarray[Any]:
         ...
 
     def read(
         self,
         band: int | list[int] | None = None,
-        out: np.ndarray | np.ma.masked_array | None = None,
+        out: npt.ArrayLike | None = None,
         window: Window | None = None,
         masked: bool = False,
-        **kwargs,
-    ) -> np.ndarray | np.ma.masked_array:
+        **kwargs: dict[str, Any],
+    ) -> npt.NDArray[Any] | np.ma.MaskedArray[Any, Any]:
         """
         Read the contents of a VRaster into memory.
 
@@ -195,9 +191,9 @@ class VRaster:
         compress: str = "deflate",
         predictor: Literal[1] | Literal[2] | Literal[3] | None = None,
         zlevel: int | str | None = None,
-        creation_options: dict[str, str] | None = None,
+        creation_options: dict[str, str | int | bool] | None = None,
         progress: bool = False,
-        callback: Callable[float, Any, Any] | None = None,
+        callback: Callable[[float, Any, Any], None] | None = None,
     ) -> None:
         """
         Write the VRaster to a file.
@@ -263,7 +259,7 @@ class VRaster:
                 # This callback function will scale 0-1 to 0-100 and only show integer increments.
                 prev = 0.0
 
-                def callback(value, *_):
+                def callback(value: float, *_: Any) -> None:
                     nonlocal prev
                     new_value = value * 100.0
                     if int(new_value) > int(prev):
@@ -278,7 +274,7 @@ class VRaster:
                 callback=callback,
             )
 
-    def add(self, other: int | float | "VRaster") -> "VRaster":
+    def add(self, other: int | float | VRaster) -> VRaster:
         """
         Perform addition on the VRaster
 
@@ -346,13 +342,7 @@ class VRaster:
         new_vraster.steps.append(VRasterStep(new, name))
         return new_vraster
 
-    def __add__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.add(other)
-
-    def __radd__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.__add__(other)
-
-    def multiply(self, other: int | float | "VRaster") -> "VRaster":
+    def multiply(self, other: int | float | VRaster) -> VRaster:
         """
         Perform multiplication on the VRaster
 
@@ -423,18 +413,9 @@ class VRaster:
         new_vraster.steps.append(VRasterStep(new, name))
         return new_vraster
 
-    def __mul__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.multiply(other)
-
-    def __rmul__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.__mul__(other)
-
-    def __neg__(self) -> "VRaster":
-        return self.multiply(-1)
-
     def warp(
         self,
-        reference: "VRaster" | None = None,
+        reference: VRaster | None = None,
         crs: CRS | int | str | None = None,
         res: tuple[float, float] | float | None = None,
         shape: tuple[int, int] | None = None,
@@ -442,7 +423,7 @@ class VRaster:
         transform: Affine | None = None,
         resampling: Resampling | str = "bilinear",
         multithread: bool = False,
-    ):
+    ) -> VRaster:
         """
         Warp the VRaster to new bounds, resolutions and/or coordinate systems.
 
@@ -453,7 +434,7 @@ class VRaster:
         reference
             Optional: A reference VRaster to get the CRS, transform and shape from.
             Note: It silently overrides the `shape`, `crs` and `transform` arguments.
-            If only parts of the reference parameters should be used, supply them directly instead (e.g. VRaster.crs). 
+            If only parts of the reference parameters should be used, supply them directly instead (e.g. VRaster.crs).
         crs
             The target coordinate reference system (CRS).
             If an integer is given, it's parsed as an EPSG code (e.g. 4326 -> WGS84).
@@ -499,7 +480,7 @@ class VRaster:
             _, vrt_filepath = new_vraster.last.to_tempfiles(temp_dir)
 
             warped_path = vrt_filepath.with_stem("warped")
-            vrt_warp(output_filepath=warped_path, input_filepath=vrt_filepath, **warp_kwargs)
+            vrt_warp(output_filepath=warped_path, input_filepath=vrt_filepath, **warp_kwargs)  # type: ignore
 
             warped = load_vrt(warped_path)
 
@@ -518,7 +499,7 @@ class VRaster:
 
         return new_vraster
 
-    def replace_nodata(self, value: int | float):
+    def replace_nodata(self, value: int | float) -> VRaster:
         """
         Replace all nodata pixels with the given value.
 
@@ -544,7 +525,7 @@ class VRaster:
         new_vraster.steps.append(VRasterStep(new, "replace_nodata"))
         return new_vraster
 
-    def inverse(self) -> "VRaster":
+    def inverse(self) -> VRaster:
         """
         Invert the VRaster (1 / x)
 
@@ -564,7 +545,7 @@ class VRaster:
         new_vraster.steps.append(VRasterStep(new, "inverse"))
         return new_vraster
 
-    def divide(self, other: int | float | "VRaster") -> "VRaster":
+    def divide(self, other: int | float | VRaster) -> VRaster:
         """
         Perform division on the VRaster
 
@@ -601,25 +582,12 @@ class VRaster:
                 new.raster_bands[i] = new_band
 
             new_vraster.steps.append(VRasterStep(new, "divide_vraster"))
-            return new_vraster
         else:
-            new = self.multiply(1 / other)
-            new.steps[-1].name = "divide_constant"
-        return new
+            new_vraster = self.multiply(1 / other)
+            new_vraster.steps[-1].name = "divide_constant"
+        return new_vraster
 
-    def __div__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.divide(other)
-
-    def __rdiv__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.inverse().__rmul__(other)
-
-    def __rtruediv__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.__rdiv__(other)
-
-    def __truediv__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.__div__(other)
-
-    def subtract(self, other: int | float | "VRaster") -> "VRaster":
+    def subtract(self, other: int | float | VRaster) -> VRaster:
         """
         Perform subtraction on the VRaster
 
@@ -641,12 +609,6 @@ class VRaster:
             new.steps[-1].name = "subtract_constant"
         return new
 
-    def __sub__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.subtract(other)
-
-    def __rsub__(self, other: int | float | "VRaster") -> "VRaster":
-        return self.__neg__().__add__(other)
-
     @property
     def n_bands(self) -> int:
         return self.last.n_bands
@@ -664,36 +626,53 @@ class VRaster:
         return self.last.bounds
 
     @property
-    def res(self):
+    def res(self) -> tuple[float, float]:
         return self.last.res
 
-    def copy(self):
+    def copy(self) -> VRaster:
         return copy.deepcopy(self)
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, int]:
         return self.last.shape
 
     @property
-    def last(self):
+    def last(self) -> VRTDataset:
         return self.steps[-1].dataset
 
     @overload
-    def sample(self, x_coord: float, y_coord: float, band: int, masked: bool) -> int | float:... 
+    def sample(
+        self, x_coord: Iterable[float], y_coord: Iterable[float], band: int | list[int], masked: Literal[False]
+    ) -> npt.NDArray[Any]:
+        ...
 
     @overload
-    def sample(self, x_coord: float, y_coord: float, band: list[int], masked: Literal[True]) -> np.ma.masked_array:... 
+    def sample(
+        self, x_coord: Iterable[float], y_coord: Iterable[float], band: int | list[int], masked: Literal[True]
+    ) -> np.ma.MaskedArray[Any, Any]:
+        ...
 
     @overload
-    def sample(self, x_coord: float, y_coord: float, band: list[int], masked: Literal[False]) -> np.ndarray:... 
+    def sample(
+        self, x_coord: float, y_coord: float, band: list[int], masked: Literal[True]
+    ) -> np.ma.MaskedArray[Any, Any]:
+        ...
 
     @overload
-    def sample(self, x_coord: Iterable[float], y_coord: Iterable[float], band: int | list[int], masked: Literal[False]) -> np.ndarray:... 
+    def sample(self, x_coord: float, y_coord: float, band: list[int], masked: Literal[False]) -> npt.NDArray[Any]:
+        ...
 
     @overload
-    def sample(self, x_coord: Iterable[float], y_coord: Iterable[float], band: int | list[int], masked: Literal[True]) -> np.ma.masked_array:... 
+    def sample(self, x_coord: float, y_coord: float, band: int, masked: bool) -> int | float:
+        ...
 
-    def sample(self, x_coord: float | Iterable[float], y_coord: float | Iterable[float], band: int | list[int] = 1, masked: bool = False) -> int | float | np.ndarray | np.ma.masked_array:
+    def sample(
+        self,
+        x_coord: float | Iterable[float],
+        y_coord: float | Iterable[float],
+        band: int | list[int] = 1,
+        masked: bool = False,
+    ) -> int | float | npt.NDArray[Any] | np.ma.MaskedArray[Any, Any]:
         """
         Sample values at the given georeferenced coordinates of a VRaster.
 
@@ -724,21 +703,38 @@ class VRaster:
         return self.steps[-1].dataset.sample(x_coord=x_coord, y_coord=y_coord, band=band, masked=masked)
 
     @overload
-    def sample_rowcol(self, row: float, col: float, band: int, masked: bool) -> int | float: ...
+    def sample_rowcol(self, row: float, col: float, band: int, masked: bool) -> int | float:
+        ...
 
     @overload
-    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[True]) -> np.ma.masked_array: ...
+    def sample_rowcol(
+        self, row: float, col: float, band: list[int], masked: Literal[True]
+    ) -> np.ma.MaskedArray[Any, Any]:
+        ...
 
     @overload
-    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[False]) -> np.ndarray: ...
+    def sample_rowcol(self, row: float, col: float, band: list[int], masked: Literal[False]) -> npt.NDArray[Any]:
+        ...
 
     @overload
-    def sample_rowcol(self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[True]) -> np.ma.masked_array: ...
+    def sample_rowcol(
+        self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[True]
+    ) -> np.ma.MaskedArray[Any, Any]:
+        ...
 
     @overload
-    def sample_rowcol(self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[False]) -> np.ndarray: ...
+    def sample_rowcol(
+        self, row: Iterable[float], col: Iterable[float], band: int | list[int], masked: Literal[False]
+    ) -> npt.NDArray[Any]:
+        ...
 
-    def sample_rowcol(self, row: float | Iterable[float], col: float | Iterable[float], band: int | list[int] = 1, masked: bool = False) -> int | float | np.ndarray | np.ma.masked_array:
+    def sample_rowcol(
+        self,
+        row: float | Iterable[float],
+        col: float | Iterable[float],
+        band: int | list[int] = 1,
+        masked: bool = False,
+    ) -> int | float | npt.NDArray[Any] | np.ma.MaskedArray[Any, Any]:
         """
         Sample values at the given row(s) and column(s) of a VRaster.
 
@@ -761,7 +757,40 @@ class VRaster:
             An array of coordinates
         """
         x_coord, y_coord = rio.transform.xy(self.transform, row, col)
-        return self.sample(x_coord, y_coord, band=band, masked=masked)
+        return self.sample(x_coord, y_coord, band=band, masked=masked)  # type: ignore
+
+    def __div__(self, other: int | float | VRaster) -> VRaster:
+        return self.divide(other)
+
+    def __rdiv__(self, other: int | float | VRaster) -> VRaster:
+        return self.inverse().__rmul__(other)
+
+    def __add__(self, other: int | float | VRaster) -> VRaster:
+        return self.add(other)
+
+    def __radd__(self, other: int | float | VRaster) -> VRaster:
+        return self.__add__(other)
+
+    def __sub__(self, other: int | float | VRaster) -> VRaster:
+        return self.subtract(other)
+
+    def __neg__(self) -> VRaster:
+        return self.multiply(-1)
+
+    def __rsub__(self, other: int | float | VRaster) -> VRaster:
+        return self.__neg__().__add__(other)
+
+    def __mul__(self, other: int | float | VRaster) -> VRaster:
+        return self.multiply(other)
+
+    def __rmul__(self, other: int | float | VRaster) -> VRaster:
+        return self.__mul__(other)
+
+    def __truediv__(self, other: int | float | VRaster) -> VRaster:
+        return self.__div__(other)
+
+    def __rtruediv__(self, other: int | float | VRaster) -> VRaster:
+        return self.__rdiv__(other)
 
 
 def load(filepath: str | Path, nodata_to_nan: bool = True) -> VRaster:

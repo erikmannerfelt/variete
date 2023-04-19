@@ -1,9 +1,12 @@
 from __future__ import annotations
-import xml.etree.ElementTree as ET
-from variete.vrt.sources import Source, source_from_etree
-from variete.vrt.pixel_functions import AnyPixelFunction, pixel_function_from_etree
-from variete import misc
+
 import warnings
+import xml.etree.ElementTree as ET
+
+from variete import misc
+from variete.vrt.pixel_functions import AnyPixelFunction, pixel_function_from_etree
+from variete.vrt.sources import Source, source_from_etree
+
 
 class VRTRasterBand:
     dtype: str
@@ -23,20 +26,14 @@ class VRTRasterBand:
         sources: list[Source],
         offset: int | float | None = None,
         scale: int | float | None = None,
-    ):
+    ) -> None:
         for attr in ["dtype", "band", "nodata", "color_interp", "sources", "scale", "offset"]:
             setattr(self, attr, locals()[attr])
 
-    def __repr__(self):
-        return "\n".join(
-            [
-                f"VRTRasterBand: dtype: {self.dtype}, band: {self.band}, nodata: {self.nodata}, color_interp: {self.color_interp}"
-            ]
-            + ["\t" + "\n\t".join(source.__repr__().splitlines()) for source in self.sources]
+    def to_etree(self) -> ET.Element:
+        band_xml = ET.Element(
+            "VRTRasterBand", {"dataType": misc.dtype_numpy_to_gdal(self.dtype), "band": str(self.band)}
         )
-
-    def to_etree(self):
-        band_xml = ET.Element("VRTRasterBand", {"dataType": misc.dtype_numpy_to_gdal(self.dtype), "band": str(self.band)})
 
         for key, gdal_key in [("nodata", "NoDataValue"), ("offset", "Offset"), ("scale", "Scale")]:
             if (value := getattr(self, key)) is not None:
@@ -51,18 +48,18 @@ class VRTRasterBand:
         return band_xml
 
     @classmethod
-    def from_etree(cls, elem: ET.Element):
-        dtype = misc.dtype_gdal_to_numpy(elem.get("dataType"))
-        band = int(elem.get("band"))
+    def from_etree(cls, elem: ET.Element) -> VRTRasterBand:
+        dtype = misc.dtype_gdal_to_numpy(elem.get("dataType", "float32"))
+        band = int(elem.get("band", 1))
 
-
-        scalars = {}
+        scalars: dict[str, float | None] = {}
         for key, gdal_key in [("nodata", "NoDataValue"), ("offset", "Offset"), ("scale", "Scale")]:
             if (sub_elem := elem.find(gdal_key)) is not None:
+                if sub_elem.text is None:
+                    raise AssertionError(f"{gdal_key} exists but is empty")
                 scalars[key] = float(sub_elem.text)
             else:
                 scalars[key] = None
-
 
         color_interp = getattr(elem.find("ColorInterp"), "text", "undefined")
 
@@ -74,6 +71,15 @@ class VRTRasterBand:
 
         return cls(dtype=dtype, band=band, color_interp=color_interp, sources=sources, **scalars)
 
+    def __repr__(self) -> str:
+        return "\n".join(
+            [
+                f"VRTRasterBand: dtype: {self.dtype}, band: {self.band},"
+                + f" nodata: {self.nodata}, color_interp: {self.color_interp}"
+            ]
+            + ["\t" + "\n\t".join(source.__repr__().splitlines()) for source in self.sources]
+        )
+
 
 class WarpedVRTRasterBand(VRTRasterBand):
     dtype: str
@@ -81,36 +87,37 @@ class WarpedVRTRasterBand(VRTRasterBand):
     color_interp: str
     nodata: float | int | None
 
-    def __init__(self, dtype: str, band: int, color_interp: str, nodata: float | int | None = None):
+    def __init__(self, dtype: str, band: int, color_interp: str, nodata: float | int | None = None) -> None:
         for attr in ["dtype", "band", "nodata", "color_interp"]:
             setattr(self, attr, locals()[attr])
 
-    def __repr__(self):
-        return f"WarpedVRTRasterBand: dtype: {self.dtype}, band: {self.band}, nodata: {self.nodata}, color_interp: {self.color_interp}"
-
     @classmethod
-    def from_etree(cls, elem: ET.Element):
-
+    def from_etree(cls, elem: ET.Element) -> WarpedVRTRasterBand:
         sub_class = elem.get("subClass")
         assert sub_class == "VRTWarpedRasterBand", f"Wrong subclass. Expected VRTWarpedRasterBand, got {sub_class}"
 
-        dtype = misc.dtype_gdal_to_numpy(elem.get("dataType"))
-        band = int(elem.get("band"))
+        dtype = misc.dtype_gdal_to_numpy(elem.get("dataType", "float32"))
+        band = int(elem.get("band", "1"))
 
         color_interp = getattr(elem.find("ColorInterp"), "text", "undefined")
 
         if (sub_elem := elem.find("NoDataValue")) is not None:
+            if sub_elem.text is None:
+                raise AssertionError("NoDataValue key exists but is empty")
             nodata = float(sub_elem.text)
         else:
             nodata = None
 
         return cls(dtype=dtype, band=band, color_interp=color_interp, nodata=nodata)
 
-    def to_etree(self):
-
+    def to_etree(self) -> ET.Element:
         band = ET.Element(
             "VRTRasterBand",
-            {"dataType": misc.dtype_numpy_to_gdal(self.dtype), "band": str(self.band), "subClass": "VRTWarpedRasterBand"},
+            {
+                "dataType": misc.dtype_numpy_to_gdal(self.dtype),
+                "band": str(self.band),
+                "subClass": "VRTWarpedRasterBand",
+            },
         )
 
         color_interp_elem = ET.SubElement(band, "ColorInterp")
@@ -121,6 +128,14 @@ class WarpedVRTRasterBand(VRTRasterBand):
             nodata_elem.text = misc.number_to_gdal(self.nodata)
 
         return band
+
+    def __repr__(self) -> str:
+        return (
+            f"WarpedVRTRasterBand: dtype: {self.dtype}, band: {self.band},"
+            + f" nodata: {self.nodata}, color_interp: {self.color_interp}"
+        )
+
+
 class VRTDerivedRasterBand(VRTRasterBand):
     pixel_function: AnyPixelFunction
 
@@ -134,20 +149,12 @@ class VRTDerivedRasterBand(VRTRasterBand):
         pixel_function: AnyPixelFunction,
         offset: int | float | None = None,
         scale: int | float | None = None,
-    ):
+    ) -> None:
         for attr in ["dtype", "band", "nodata", "color_interp", "sources", "scale", "offset", "pixel_function"]:
             setattr(self, attr, locals()[attr])
 
-    def __repr__(self):
-        return "\n".join(
-            [
-                f"VRTDerivedRasterBand: dtype: {self.dtype}, band: {self.band}, nodata: {self.nodata}, color_interp: {self.color_interp}, {self.pixel_function.__repr__()}",
-            ]
-            + ["\t" + "\n\t".join(source.__repr__().splitlines()) for source in self.sources]
-        )
-
     @classmethod
-    def from_etree(cls, elem: ET.Element):
+    def from_etree(cls, elem: ET.Element) -> VRTDerivedRasterBand:
         sub_class = elem.get("subClass")
         assert sub_class == "VRTDerivedRasterBand", f"Wrong subclass. Expected VRTDerivedRasterBand, got {sub_class}"
 
@@ -164,11 +171,10 @@ class VRTDerivedRasterBand(VRTRasterBand):
             pixel_function=pixel_function,
             offset=base.offset,
             scale=base.scale,
-            
         )
 
     @classmethod
-    def from_raster_band(cls, band: VRTRasterBand, pixel_function: AnyPixelFunction):
+    def from_raster_band(cls, band: VRTRasterBand, pixel_function: AnyPixelFunction) -> VRTDerivedRasterBand:
         return cls(
             dtype=band.dtype,
             band=band.band,
@@ -177,10 +183,10 @@ class VRTDerivedRasterBand(VRTRasterBand):
             sources=band.sources,
             pixel_function=pixel_function,
             offset=band.offset,
-            scale=band.scale
+            scale=band.scale,
         )
 
-    def to_etree(self):
+    def to_etree(self) -> ET.Element:
         base = VRTRasterBand.to_etree(self)
         base.set("subClass", "VRTDerivedRasterBand")
 
@@ -189,11 +195,20 @@ class VRTDerivedRasterBand(VRTRasterBand):
 
         return base
 
+    def __repr__(self) -> str:
+        return "\n".join(
+            [
+                f"VRTDerivedRasterBand: dtype: {self.dtype}, band: {self.band},"
+                + f" nodata: {self.nodata}, color_interp: {self.color_interp}, {self.pixel_function.__repr__()}",
+            ]
+            + ["\t" + "\n\t".join(source.__repr__().splitlines()) for source in self.sources]
+        )
+
 
 AnyRasterBand = VRTRasterBand | VRTDerivedRasterBand
 
-def raster_band_from_etree(elem: ET.Element):
 
+def raster_band_from_etree(elem: ET.Element) -> AnyRasterBand:
     if elem.tag != "VRTRasterBand":
         raise ValueError(f"Invalid raster band tag: {elem.tag}")
 
@@ -206,5 +221,7 @@ def raster_band_from_etree(elem: ET.Element):
         return VRTDerivedRasterBand.from_etree(elem)
 
     if subclass is not None:
-        warnings.warn(f"Unknown VRTRasterBand class: '{subclass}'. Trying to treat as a classless VRTRasterBand")
+        warnings.warn(
+            f"Unknown VRTRasterBand class: '{subclass}'. Trying to treat as a classless VRTRasterBand", stacklevel=2
+        )
     return VRTRasterBand.from_etree(elem)

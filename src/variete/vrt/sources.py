@@ -1,13 +1,16 @@
 from __future__ import annotations
+
+import copy
 import warnings
 import xml.etree.ElementTree as ET
 from pathlib import Path
-import copy
-
 from typing import TYPE_CHECKING
+
+from variete import misc
 
 if TYPE_CHECKING:
     from variete.vrt.vrt import VRTDataset
+
 
 class SourceProperties:
     shape: tuple[int, int]
@@ -18,11 +21,7 @@ class SourceProperties:
         for attr in ["shape", "dtype", "block_size"]:
             setattr(self, attr, locals()[attr])
 
-    def __repr__(self):
-        return f"SourceProperties: shape: {self.shape}, dtype: {self.dtype}, block_size: {self.block_size}"
-
     def to_etree(self) -> ET.Element:
-
         return ET.Element(
             "SourceProperties",
             {
@@ -35,13 +34,15 @@ class SourceProperties:
         )
 
     @classmethod
-    def from_etree(cls, elem: ET.Element):
-
-        shape = (int(elem.get("RasterYSize")), int(elem.get("RasterXSize")))
-        dtype = elem.get("DataType").lower()
-        block_size = (int(elem.get("BlockYSize")), int(elem.get("BlockXSize")))
+    def from_etree(cls, elem: ET.Element) -> SourceProperties:
+        shape = (int(elem.get("RasterYSize", 0)), int(elem.get("RasterXSize", 0)))
+        dtype = elem.get("DataType", "Byte").lower()
+        block_size = (int(elem.get("BlockYSize", "1")), int(elem.get("BlockXSize", "1")))
 
         return cls(shape=shape, dtype=dtype, block_size=block_size)
+
+    def __repr__(self) -> str:
+        return f"SourceProperties: shape: {self.shape}, dtype: {self.dtype}, block_size: {self.block_size}"
 
 
 class Window:
@@ -54,10 +55,7 @@ class Window:
         for attr in ["x_off", "y_off", "x_size", "y_size"]:
             setattr(self, attr, locals()[attr])
 
-    def __repr__(self):
-        return f"Window: x_off: {self.x_off}, y_off: {self.y_off}, x_size: {self.x_size}, y_size: {self.y_size}"
-
-    def to_etree(self, name: str = "SrcRect"):
+    def to_etree(self, name: str = "SrcRect") -> ET.Element:
         return ET.Element(
             name,
             {
@@ -72,13 +70,16 @@ class Window:
         )
 
     @classmethod
-    def from_etree(cls, elem: ET.Element):
+    def from_etree(cls, elem: ET.Element) -> Window:
         return cls(
-            x_off=float(elem.get("xOff")),
-            y_off=float(elem.get("yOff")),
-            x_size=float(elem.get("xSize")),
-            y_size=float(elem.get("ySize")),
+            x_off=float(elem.get("xOff", 0)),
+            y_off=float(elem.get("yOff", 0)),
+            x_size=float(elem.get("xSize", 0)),
+            y_size=float(elem.get("ySize", 0)),
         )
+
+    def __repr__(self) -> str:
+        return f"Window: x_off: {self.x_off}, y_off: {self.y_off}, x_size: {self.x_size}, y_size: {self.y_size}"
 
 
 class ComplexSource:
@@ -87,22 +88,21 @@ class ComplexSource:
     source_properties: SourceProperties | None
     relative_filename: bool
     nodata: int | float | None
-    src_window: Window
-    dst_window: Window
+    src_window: Window | None
+    dst_window: Window | None
     source_kind: str
 
     def __init__(
         self,
-        source_filename: Path | str,
+        source_filename: Path | str | VRTDataset,
         source_band: int,
-        source_properties: SourceProperties,
+        source_properties: SourceProperties | None,
         nodata: int | float | None,
-        src_window: Window,
-        dst_window: Window,
+        src_window: Window | None,
+        dst_window: Window | None,
         relative_filename: bool | None = None,
         source_kind: str = "ComplexSource",
     ):
-
         if relative_filename is None:
             if isinstance(source_filename, Path):
                 self.relative_filename = not source_filename.is_absolute()
@@ -118,23 +118,10 @@ class ComplexSource:
         self.dst_window = dst_window
         self.source_kind = source_kind
 
-    def __repr__(self):
-        return "\n".join(
-            [
-                self.source_kind,
-                f"\tSource filename: {self.source_filename}",
-                f"\tSource band: {self.source_band}",
-                f"\tSource properties: {self.source_properties.__repr__()}",
-                f"\tNodata: {self.nodata}",
-                f"\tSource window: {self.src_window.__repr__()}",
-                f"\tDest. window: {self.dst_window.__repr__()}",
-            ]
-        )
-
-    def copy(self):
+    def copy(self) -> ComplexSource:
         return copy.deepcopy(self)
 
-    def to_etree(self):
+    def to_etree(self) -> ET.Element:
         source_xml = ET.Element(self.source_kind)
 
         if hasattr(self.source_filename, "to_etree"):
@@ -158,28 +145,33 @@ class ComplexSource:
             source_xml.append(self.dst_window.to_etree("DstRect"))
 
         if self.nodata is not None:
-            nodata_xml = ET.SubElement(source_xml, "NODATA")
-            nodata_xml.text = str(int(self.nodata) if self.nodata.is_integer() else self.nodata)
+            source_xml.append(misc.new_element("NODATA", misc.number_to_gdal(self.nodata)))
 
         return source_xml
 
     @classmethod
-    def from_etree(cls, elem: ET.Element):
+    def from_etree(cls, elem: ET.Element) -> ComplexSource:
         source_kind = elem.tag
         filename_elem = elem.find("SourceFilename")
+        if filename_elem is None:
+            raise AssertionError("Expected SourceFilename key")
 
-        relative_filename = bool(int(filename_elem.get("relativeToVRT")))
-        source_filename = filename_elem.text
+        relative_filename = bool(int(filename_elem.get("relativeToVRT", 0)))
+        source_filename_str = filename_elem.text
+        if source_filename_str is None:
+            raise AssertionError("Empty SourceFilename")
 
-        if not source_filename.startswith("/vsi"):
-            source_filename = Path(source_filename)
+        if not source_filename_str.startswith("/vsi"):
+            source_filename: Path | str = Path(source_filename_str)
+        else:
+            source_filename = source_filename_str
 
         source_band = 1
         if (sub_elem := elem.find("SourceBand")) is not None:
             if (text := sub_elem.text) is not None:
                 if text.isnumeric():
                     source_band = int(text)
-        #source_band = int(getattr(elem.find("SourceBand"), "text", 1))
+        # source_band = int(getattr(elem.find("SourceBand"), "text", 1))
 
         if (prop_elem := elem.find("SourceProperties")) is not None:
             source_properties = SourceProperties.from_etree(prop_elem)
@@ -194,7 +186,10 @@ class ComplexSource:
             dst_window = Window.from_etree(sub_elem)
 
         if (nodata_elem := elem.find("NODATA")) is not None:
-            nodata = float(nodata_elem.text)
+            if nodata_elem.text is None:
+                nodata = nodata_elem.text
+            else:
+                nodata = float(nodata_elem.text)
         else:
             nodata = None
 
@@ -209,26 +204,39 @@ class ComplexSource:
             source_kind=source_kind,
         )
 
+    def __repr__(self) -> str:
+        return "\n".join(
+            [
+                self.source_kind,
+                f"\tSource filename: {self.source_filename}",
+                f"\tSource band: {self.source_band}",
+                f"\tSource properties: {self.source_properties.__repr__()}",
+                f"\tNodata: {self.nodata}",
+                f"\tSource window: {self.src_window.__repr__()}",
+                f"\tDest. window: {self.dst_window.__repr__()}",
+            ]
+        )
+
 
 class SimpleSource(ComplexSource):
-    source_filename: Path | str | "VRTDataset"
+    source_filename: Path | str | VRTDataset
     source_band: int
     source_properties: None
     nodata: None
     src_window: None
     dst_window: None
-    relative_filename: bool | None
+    relative_filename: bool
 
     def __init__(
         self,
-        source_filename: Path | str,
+        source_filename: Path | str | VRTDataset,
         source_band: int | None = None,
         src_window: None = None,
         dst_window: None = None,
         relative_filename: None = None,
         source_kind: None = None,
         source_properties: None = None,
-        nodata: None = None
+        nodata: None = None,
     ):
         if relative_filename is None:
             if isinstance(source_filename, Path):
@@ -247,13 +255,12 @@ class SimpleSource(ComplexSource):
 
 Source = ComplexSource | SimpleSource
 
-def source_from_etree(elem: ET.Element) -> Source:
 
+def source_from_etree(elem: ET.Element) -> Source:
     if elem.tag == "ComplexSource":
         return ComplexSource.from_etree(elem)
     elif elem.tag == "SimpleSource":
         return SimpleSource.from_etree(elem)
 
-    warnings.warn(f"Unknown source tag: '{elem.tag}'. Trying to treat as ComplexSource")
+    warnings.warn(f"Unknown source tag: '{elem.tag}'. Trying to treat as ComplexSource", stacklevel=2)
     return ComplexSource.from_etree(elem)
-

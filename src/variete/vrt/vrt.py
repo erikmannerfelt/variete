@@ -1,28 +1,32 @@
 from __future__ import annotations
-from rasterio import CRS
+
+import copy
+import hashlib
+import tempfile
+import warnings
+import xml.etree.ElementTree as ET
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Callable, Iterable, Literal, Sequence
+
+import numpy as np
+import numpy.typing as npt
 import rasterio as rio
 from affine import Affine
-import xml.etree.ElementTree as ET
-from typing import Literal, Callable, Iterable, Sequence
-import tempfile
 from osgeo import gdal
+from rasterio import CRS
 from rasterio.coords import BoundingBox
 from rasterio.warp import Resampling
-import warnings
-from variete.vrt.raster_bands import AnyRasterBand, WarpedVRTRasterBand, raster_band_from_etree
+
 from variete import misc
-import copy
-from tempfile import TemporaryDirectory
-import hashlib
-import numpy as np
+from variete.vrt.raster_bands import AnyRasterBand, raster_band_from_etree
 
 
 def build_vrt(
     output_filepath: Path | str,
     filepaths: Path | str | list[Path | str],
     calculate_resolution: Literal["highest"] | Literal["lowest"] | Literal["average"] | Literal["user"] = "average",
-    res: tuple[float, float] = None,
+    res: tuple[float, float] | None = None,
     separate: bool = False,
     output_bounds: BoundingBox | None = None,
     resample_algorithm: Resampling = Resampling.bilinear,
@@ -34,15 +38,14 @@ def build_vrt(
     src_nodata: int | float | None = None,
     vrt_nodata: int | float | None = None,
     strict: bool = True,
-):
-
+) -> None:
     if target_aligned_pixels and res is None:
         raise ValueError(f"{target_aligned_pixels=} requires that 'res' is specified")
-    if any(isinstance(filepaths, t) for t in [str, Path]):
+    if isinstance(filepaths, (str, Path)):
         filepaths = [filepaths]
     if res is not None:
-        x_res = res[0]
-        y_res = res[1]
+        x_res: float | None = res[0]
+        y_res: float | None = res[1]
     else:
         x_res = y_res = None
 
@@ -77,19 +80,18 @@ def build_vrt(
 def vrt_warp(
     output_filepath: Path | str,
     input_filepath: Path | str,
-    #src_crs: CRS | int | str | None = None,
+    # src_crs: CRS | int | str | None = None,
     dst_crs: CRS | int | str | None = None,
-    dst_res: tuple[float, float] | float | None = None, 
-    #src_res: tuple[float, float] | None = None,
+    dst_res: tuple[float, float] | float | None = None,
+    # src_res: tuple[float, float] | None = None,
     dst_shape: tuple[int, int] | None = None,
-    #src_bounds: BoundingBox | list[float] | None = None,
+    # src_bounds: BoundingBox | list[float] | None = None,
     dst_bounds: BoundingBox | list[float] | None = None,
-    #src_transform: Affine | None = None,
+    # src_transform: Affine | None = None,
     dst_transform: Affine | None = None,
     resampling: Resampling | str = "bilinear",
     multithread: bool = False,
 ) -> None:
-
     if isinstance(resampling, str):
         resampling = getattr(Resampling, resampling)
 
@@ -115,27 +117,26 @@ def vrt_warp(
         raise ValueError("dst_transform and dst_bounds cannot be used at the same time.")
 
     if dst_shape is not None and dst_res is not None:
-        raise ValueError("dst_shape and dst_res cannot be used at the same time.") 
+        raise ValueError("dst_shape and dst_res cannot be used at the same time.")
 
     if dst_transform is not None:
-        #kwargs["dstTransform"] = dst_transform.to_gdal()
+        # kwargs["dstTransform"] = dst_transform.to_gdal()
         kwargs["outputBounds"] = list(rio.transform.array_bounds(*dst_shape, dst_transform))
 
     if dst_shape is not None:
         kwargs["width"] = dst_shape[1]
         kwargs["height"] = dst_shape[0]
 
-
     if dst_res is not None:
         if isinstance(dst_res, Sequence):
-            kwargs["xRes"] = dst_res[0]
-            kwargs["yRes"] = dst_res[1]
+            kwargs["xRes"] = dst_res[0]  # type: ignore
+            kwargs["yRes"] = dst_res[1]  # type: ignore
         else:
             kwargs["xRes"] = dst_res
             kwargs["yRes"] = dst_res
 
-
     gdal.Warp(str(output_filepath), str(input_filepath), **kwargs)
+
 
 def build_warped_vrt(
     vrt_filepath: Path | str,
@@ -145,7 +146,6 @@ def build_warped_vrt(
     max_error: float = 0.125,
     src_crs: CRS | int | str | None = None,
 ) -> None:
-
     crss = {"dst_wkt": dst_crs, "src_wkt": src_crs}
     for key, crs in crss.items():
         if crs is None:
@@ -183,18 +183,11 @@ class VRTDataset:
         transform: Affine,
         raster_bands: list[AnyRasterBand],
         crs_mapping: str = "2,1",
-    ):
-
+    ) -> None:
         for attr in ["shape", "crs", "crs_mapping", "transform", "raster_bands"]:
             setattr(self, attr, locals()[attr])
 
         self.subclass = self.warp_options = None
-
-    def __repr__(self):
-        return "\n".join(
-            [f"VRTDataset: shape={self.shape}, crs=EPSG:{self.crs.to_epsg()}, bounds: {self.bounds}"]
-            + ["\t" + "\n\t".join(band.__repr__().splitlines()) for band in self.raster_bands]
-        )
 
     @property
     def n_bands(self) -> int:
@@ -211,7 +204,7 @@ class VRTDataset:
         """
         return self.transform.a, -self.transform.e
 
-    def to_etree(self):
+    def to_etree(self) -> ET.Element:
         vrt = ET.Element("VRTDataset", {"rasterXSize": str(self.shape[1]), "rasterYSize": str(self.shape[0])})
 
         crs = ET.SubElement(vrt, "SRS", {"dataAxisToSRSAxisMapping": self.crs_mapping})
@@ -225,51 +218,45 @@ class VRTDataset:
 
         return vrt
 
-    def to_xml(self):
+    def to_xml(self) -> str:
         vrt = self.to_etree()
         ET.indent(vrt)
         return ET.tostring(vrt).decode()
 
     @classmethod
-    def from_etree(cls, root: ET.Element):
-        x_size, y_size = [int(root.get(f"raster{k}Size")) for k in ["X", "Y"]]
+    def from_etree(cls, root: ET.Element) -> VRTDataset:
+        x_size, y_size = (int(root.get(f"raster{k}Size", 0)) for k in ["X", "Y"])
 
-        srs_elem = root.find("SRS")
-        crs = CRS.from_string(srs_elem.text)
-        crs_mapping = srs_elem.get("dataAxisToSRSAxisMapping")
+        srs_elem, srs_text = misc.find_element(root, "SRS", "both")
+        crs = CRS.from_string(srs_text)
+        crs_mapping = srs_elem.get("dataAxisToSRSAxisMapping", "2,1")
 
-        geotransform_elem = root.find("GeoTransform")
-
-        transform = misc.parse_gdal_transform(geotransform_elem.text)
+        transform = misc.parse_gdal_transform(misc.find_element(root, "GeoTransform", True))
 
         raster_bands = []
         for band in root.findall("VRTRasterBand"):
-
             raster_bands.append(raster_band_from_etree(band))
 
         return cls(
             shape=(y_size, x_size), crs=crs, transform=transform, raster_bands=raster_bands, crs_mapping=crs_mapping
         )
 
-    def copy(self):
+    def copy(self) -> VRTDataset:
         return copy.deepcopy(self)
 
     @classmethod
-    def from_xml(cls, xml: str):
+    def from_xml(cls, xml: str) -> VRTDataset:
         vrt = ET.fromstring(xml)
         return cls.from_etree(vrt)
 
     @classmethod
-    def load_vrt(cls, filepath: Path):
+    def load_vrt(cls, filepath: Path) -> VRTDataset:
         with open(filepath) as infile:
             return cls.from_xml(infile.read())
 
-    def save_vrt(self, filepath: Path) -> None:
+    def save_vrt(self, filepath: str | Path) -> None:
         with open(filepath, "w") as outfile:
             outfile.write(self.to_xml())
-
-    def save_vrt_nested(self, filepath: Path | str) -> list[Path]:
-        return list(set(self._save_vrt_nested(filepath=Path(filepath).absolute(), nested_level=[])))
 
     def _save_vrt_nested(self, filepath: Path, nested_level: list[int]) -> list[Path]:
         if len(nested_level) == 0:
@@ -284,7 +271,7 @@ class VRTDataset:
         for raster_band in vrt.raster_bands:
             for source in raster_band.sources:
                 if hasattr(source.source_filename, "_save_vrt_nested"):
-                    #new_filepath = filepath.with_stem(filepath.stem + "-" + str(j).zfill(2))
+                    # new_filepath = filepath.with_stem(filepath.stem + "-" + str(j).zfill(2))
                     new_nest = nested_level.copy()
                     new_nest[-1] = j
                     new_filepaths = source.source_filename._save_vrt_nested(filepath, new_nest)
@@ -294,17 +281,19 @@ class VRTDataset:
                     j += 1
 
         vrt.save_vrt(save_filepath)
-        #print(f"Saved {save_filepath}: {nested_level}")
-        
+        # print(f"Saved {save_filepath}: {nested_level}")
+
         return filepaths
-        
+
+    def save_vrt_nested(self, filepath: Path | str) -> list[Path]:
+        return list(set(self._save_vrt_nested(filepath=Path(filepath).absolute(), nested_level=[])))
 
     @classmethod
-    def from_file(cls, filepaths: Path | str | list[Path | str], **kwargs):
+    def from_file(cls, filepaths: Path | str | list[Path | str], **kwargs: dict[str, Any]) -> VRTDataset:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_vrt = Path(temp_dir).joinpath("temp.vrt")
 
-            build_vrt(output_filepath=temp_vrt, filepaths=filepaths, **kwargs)
+            build_vrt(output_filepath=temp_vrt, filepaths=filepaths, **kwargs)  # type: ignore
             return cls.load_vrt(temp_vrt)
 
     def sha1(self) -> str:
@@ -317,32 +306,18 @@ class VRTDataset:
                     return True
         return False
 
-    def to_tempfiles(self, temp_dir: TemporaryDirectory | str | Path | None = None) -> tuple[TemporaryDirectory, Path]:
-
+    def to_tempfiles(
+        self, temp_dir: TemporaryDirectory[str] | str | Path | None = None
+    ) -> tuple[TemporaryDirectory[str] | str | Path, Path]:
         if temp_dir is None:
             temp_dir = TemporaryDirectory(prefix="variete")
-
-        
-        temp_dir_path = Path(getattr(temp_dir, "name", temp_dir))
+        if isinstance(temp_dir, TemporaryDirectory):
+            temp_dir_path = Path(temp_dir.name)
+        else:
+            temp_dir_path = Path(temp_dir)
         filepath = temp_dir_path.joinpath("vrtdataset.vrt")
 
         self.save_vrt_nested(filepath)
-        return temp_dir, filepath
-
-        vrt = self.copy()
-        for raster_band in vrt.raster_bands:
-            for source in raster_band.sources:
-                if hasattr(source.source_filename, "to_tempfiles"):
-                    _, new_filepath = source.source_filename.to_tempfiles(temp_dir=temp_dir)
-                    source.source_filename = new_filepath
-                    source.relative_filename = False
-
-        temp_dir_path = Path(getattr(temp_dir, "name", temp_dir))
-
-        filepath = temp_dir_path.joinpath(vrt.sha1()).with_suffix(".vrt")
-
-        vrt.save_vrt(filepath)
-
         return temp_dir, filepath
 
     def to_memfile(self) -> rio.MemoryFile:
@@ -351,8 +326,8 @@ class VRTDataset:
         return rio.MemoryFile(self.to_xml().encode(), ext=".vrt")
 
     def to_memfile_nested(
-        self, temp_dir: TemporaryDirectory | str | Path | None
-    ) -> tuple[TemporaryDirectory, rio.MemoryFile]:
+        self, temp_dir: TemporaryDirectory[str] | str | Path | None
+    ) -> tuple[TemporaryDirectory[str] | Path | str | None, rio.MemoryFile]:
         if not self.is_nested():
             return (temp_dir, self.to_memfile())
 
@@ -365,14 +340,14 @@ class VRTDataset:
             return (temp_dir, rio.MemoryFile(infile.read()))
 
     @property
-    def open_rio(self) -> Callable[None, rio.DatasetReader]:
+    def open_rio(self) -> Callable[..., rio.DatasetReader]:
         if self.is_nested():
             raise ValueError("Nested VRTs require temporary saving to work (see open_rio_nested")
         return self.to_memfile().open
 
     def open_rio_nested(
-        self, temp_dir: TemporaryDirectory | str | Path | None = None
-    ) -> tuple[TemporaryDirectory, Callable[None, rio.DatasetReader]]:
+        self, temp_dir: TemporaryDirectory[str] | str | Path | None = None
+    ) -> tuple[TemporaryDirectory[str] | str | Path | None, Callable[..., rio.DatasetReader]]:
         if not self.is_nested():
             return (temp_dir, self.open_rio)
 
@@ -381,19 +356,38 @@ class VRTDataset:
 
         return (temp_dir, self.to_memfile_nested(temp_dir=temp_dir)[1].open)
 
-    def sample(self, x_coord: float, y_coord: float, band: int | list[int] = 1, masked: bool = False):
-        if not isinstance(x_coord, Iterable):
-            x_coord = [x_coord]
-            y_coord = [y_coord]
+    def sample(
+        self,
+        x_coord: float | Iterable[float],
+        y_coord: float | Iterable[float],
+        band: int | list[int] = 1,
+        masked: bool = False,
+    ) -> int | float | npt.NDArray[Any]:
+        x_coords: Iterable[float] = []
+        y_coords: Iterable[float] = []
+        if isinstance(x_coord, float):
+            x_coords = [x_coord]
+        else:
+            x_coords = x_coord
+        if isinstance(y_coord, float):
+            y_coords = [y_coord]
+        else:
+            y_coords = y_coord
         with self.open_rio() as raster:
             values = np.fromiter(
-                raster.sample(zip(x_coord, y_coord), indexes=band, masked=masked),
-                dtype=self.raster_bands[band - 1].dtype,
-                count=len(x_coord),
+                raster.sample(zip(x_coords, y_coords), indexes=band, masked=masked),
+                dtype=self.raster_bands[0].dtype,
+                count=-1 if not hasattr(x_coords, "__len__") else len(x_coords),  # type: ignore
             ).ravel()
             if values.size > 1:
                 return values
             return values[0]
+
+    def __repr__(self) -> str:
+        return "\n".join(
+            [f"VRTDataset: shape={self.shape}, crs=EPSG:{self.crs.to_epsg()}, bounds: {self.bounds}"]
+            + ["\t" + "\n\t".join(band.__repr__().splitlines()) for band in self.raster_bands]
+        )
 
 
 class WarpedVRTDataset(VRTDataset):
@@ -402,7 +396,7 @@ class WarpedVRTDataset(VRTDataset):
     crs_mapping: str
     transform: Affine
     block_size: tuple[int, int]
-    raster_bands: list[WarpedVRTRasterBand]
+    raster_bands: list[AnyRasterBand]
     warp_memory_limit: float
     resample_algorithm: Resampling
     dst_dtype: str
@@ -422,7 +416,7 @@ class WarpedVRTDataset(VRTDataset):
         shape: tuple[int, int],
         crs: CRS,
         transform: Affine,
-        raster_bands: list[WarpedVRTRasterBand],
+        raster_bands: list[AnyRasterBand],
         resample_algorithm: Resampling,
         block_size: tuple[int, int],
         dst_dtype: str,
@@ -459,35 +453,42 @@ class WarpedVRTDataset(VRTDataset):
             setattr(self, attr, locals()[attr])
 
     @classmethod
-    def from_etree(cls, root: ET.Element):
-
+    def from_etree(cls, root: ET.Element) -> WarpedVRTDataset:
         initial = VRTDataset.from_etree(root)
 
-        block_size = tuple([int(root.find(f"Block{dim}Size").text) for dim in ["X", "Y"]])
+        block_size = int(misc.find_element(root, "BlockXSize", True, "1")), int(
+            misc.find_element(root, "BlockYSize", True, "1")
+        )
+        # block_size = tuple([int(getattr(root.find(f"Block{dim}Size"), "text", 0)) for dim in ["X", "Y"]])
 
-        warp_options = root.find("GDALWarpOptions")
+        warp_options = misc.find_element(root, "GDALWarpOptions", False, None)
 
-        resample_algorithm = misc.resampling_gdal_to_rio(warp_options.find("ResampleAlg").text)
-        dst_dtype = misc.dtype_gdal_to_numpy(warp_options.find("WorkingDataType").text)
-        warp_memory_limit = float(warp_options.find("WarpMemoryLimit").text)
+        resample_algorithm = misc.resampling_gdal_to_rio(
+            misc.find_element(warp_options, "ResampleAlg", True, "bilinear")
+        )
+        dst_dtype = misc.dtype_gdal_to_numpy(misc.find_element(warp_options, "WorkingDataType", True, "float32"))
 
-        source_dataset_elem = warp_options.find("SourceDataset")
-        source_dataset = source_dataset_elem.text
+        warp_memory_limit = float(misc.find_element(warp_options, "WarpMemoryLimit", True, "0"))
 
-        if not source_dataset.startswith("/vsi"):
+        source_dataset_elem, source_dataset_text = misc.find_element(warp_options, "SourceDataset", text="both")
+        source_dataset: str | Path = source_dataset_text
+
+        if not source_dataset_text.startswith("/vsi"):
             source_dataset = Path(source_dataset)
 
-        relative_filename = bool(int(source_dataset_elem.get("relativeToVRT")))
+        relative_filename = bool(int(source_dataset_elem.get("relativeToVRT", 0)))
 
         options = {}
         for option_elem in warp_options.findall("Option"):
-            options[option_elem.get("name")] = option_elem.text
+            if (name := option_elem.get("name")) is not None:
+                if option_elem.text is not None:
+                    options[name] = option_elem.text
 
-        transformer = warp_options.find("Transformer").find("ApproxTransformer")
+        transformer = misc.find_element(warp_options, ["Transformer", "ApproxTransformer"])
 
-        max_error = float(transformer.find("MaxError").text)
+        max_error = float(getattr(transformer.find("MaxError"), "text", 0.125))
 
-        proj_transformer = transformer.find("BaseTransformer").find("GenImgProjTransformer")
+        proj_transformer = misc.find_element(transformer, ["BaseTransformer", "GenImgProjTransformer"])
 
         transforms = {}
         for key, gdal_key in [
@@ -496,11 +497,19 @@ class WarpedVRTDataset(VRTDataset):
             ("dst_transform", "DstGeoTransform"),
             ("dst_inv_transform", "DstInvGeoTransform"),
         ]:
-            transforms[key] = misc.parse_gdal_transform(proj_transformer.find(gdal_key).text)
+            transforms[key] = misc.parse_gdal_transform(misc.find_element(proj_transformer, gdal_key, text=True))
 
         band_mapping = []
-        for band_map in warp_options.find("BandList").findall("BandMapping"):
-            band_mapping.append((int(band_map.get("src")), int(band_map.get("dst"))))
+        for band_map in misc.find_element(warp_options, "BandList").findall("BandMapping"):
+            src = band_map.get("src")
+            if src is None:
+                raise ValueError("Invalid src in BandMapping")
+
+            dst = band_map.get("dst")
+            if dst is None:
+                raise ValueError("Invalid dst in BandMapping")
+
+            band_mapping.append((int(src), int(dst)))
 
         return cls(
             shape=initial.shape,
@@ -521,7 +530,7 @@ class WarpedVRTDataset(VRTDataset):
             **transforms,
         )
 
-    def to_etree(self):
+    def to_etree(self) -> ET.Element:
         vrt = ET.Element(
             "VRTDataset",
             {"rasterXSize": str(self.shape[1]), "rasterYSize": str(self.shape[0]), "subClass": "VRTWarpedDataset"},
@@ -557,7 +566,7 @@ class WarpedVRTDataset(VRTDataset):
 
         warp.append(
             misc.new_element(
-                "SourceDataset", str(self.source_dataset), {"relativeToVRT": str(int(self.relative_filename))}
+                "SourceDataset", str(self.source_dataset), {"relativeToVRT": str(int(self.relative_filename or 0))}
             )
         )
 
@@ -578,7 +587,7 @@ class WarpedVRTDataset(VRTDataset):
         band_list = ET.SubElement(warp, "BandList")
 
         for src, dst in self.band_mapping:
-            band_list.append(misc.new_element("BandMapping", None, {"src": src, "dst": dst}))
+            band_list.append(misc.new_element("BandMapping", None, {"src": str(src), "dst": str(dst)}))
 
         return vrt
 
@@ -596,22 +605,24 @@ class WarpedVRTDataset(VRTDataset):
         vrt = self.copy()
         if vrt.is_nested():
             new_nest = nested_level[:-1] + [1]
-            new_filepaths = vrt.source_dataset._save_vrt_nested(filepath, new_nest) 
+            new_filepaths = vrt.source_dataset._save_vrt_nested(filepath, new_nest)
             vrt.source_dataset = new_filepaths[0]
             vrt.relative_filename = False
             filepaths += new_filepaths
 
         vrt.save_vrt(save_filepath)
-        #print(f"Saved {save_filepath}: {nested_level}")
-        
+        # print(f"Saved {save_filepath}: {nested_level}")
+
         return filepaths
 
-    @classmethod
-    def from_file(cls, filepath: Path | str, dst_crs: CRS | int | str, **kwargs):
+    @classmethod  # type: ignore
+    def from_file(
+        cls, filepath: Path | str, dst_crs: CRS | int | str, **kwargs: dict[str, Any]
+    ) -> VRTDataset:  # type: ignore
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_vrt = Path(temp_dir).joinpath("temp.vrt")
 
-            build_warped_vrt(vrt_filepath=temp_vrt, filepath=filepath, dst_crs=dst_crs, **kwargs)
+            build_warped_vrt(vrt_filepath=temp_vrt, filepath=filepath, dst_crs=dst_crs, **kwargs)  # type: ignore
 
             vrt = cls.load_vrt(temp_vrt)
 
@@ -627,7 +638,6 @@ AnyVRTDataset = VRTDataset | WarpedVRTDataset
 
 
 def dataset_from_etree(elem: ET.Element) -> AnyVRTDataset:
-
     if elem.tag != "VRTDataset":
         raise ValueError(f"Invalid root tag for VRT: {elem.tag}")
 
@@ -637,7 +647,7 @@ def dataset_from_etree(elem: ET.Element) -> AnyVRTDataset:
         return WarpedVRTDataset.from_etree(elem)
 
     if subclass is not None:
-        warnings.warn(f"Unexpected subClass tag: {subclass}. Ignoring it")
+        warnings.warn(f"Unexpected subClass tag: {subclass}. Ignoring it", stacklevel=2)
 
     return VRTDataset.from_etree(elem)
 
@@ -647,15 +657,3 @@ def load_vrt(filepath: str | Path) -> AnyVRTDataset:
         root = ET.fromstring(infile.read())
 
     return dataset_from_etree(root)
-
-
-def main():
-
-    filepath = Path("Marma_DEM_2021.tif")
-    vrt_path = Path("stack.vrt")
-
-    # pixel_function = SumPixelFunction(5)
-
-
-if __name__ == "__main__":
-    main()

@@ -1,7 +1,9 @@
 from __future__ import annotations
-from typing import Literal
-from variete import misc
+
 import xml.etree.ElementTree as ET
+from typing import Literal
+
+from variete import misc
 
 
 class PixelFunction:
@@ -20,11 +22,7 @@ class PixelFunction:
         for attr in ["arguments", "name", "code", "language"]:
             setattr(self, attr, locals()[attr])
 
-    def __repr__(self):
-        code_string = f" {len(self.code)} character custom code" if self.code is not None else ""
-        return "\n".join([f"PixelFunction: {self.name}({self.arguments or ''}){code_string}"])
-
-    def validate(self, n_bands: int):
+    def validate(self, n_bands: int) -> None:
         assert len(self.name) > 0, "The PixelFunction must have a name"
         assert self.language is None or self.language == "Python", "PixelFunction language must be None or 'Python'"
 
@@ -34,7 +32,6 @@ class PixelFunction:
             raise AssertionError("PixelFunction code is given but the language is not provided")
 
     def to_etree_keys(self) -> list[ET.Element]:
-
         keys = []
 
         keys.append(misc.new_element("PixelFunctionType", self.name))
@@ -48,14 +45,18 @@ class PixelFunction:
 
         return keys
 
+    def __repr__(self) -> str:
+        code_string = f" {len(self.code)} character custom code" if self.code is not None else ""
+        return "\n".join([f"PixelFunction: {self.name}({self.arguments or ''}){code_string}"])
+
 
 class SumPixelFunction(PixelFunction):
-    def __init__(self, constant: int | float | None = None):
+    def __init__(self, constant: int | float | str | None = None):
         self.name = "sum"
         self.arguments = {"k": misc.number_to_gdal(constant)} if constant is not None else None
         self.code = self.language = None
 
-    def validate(self, n_bands: int):
+    def validate(self, n_bands: int) -> None:
         PixelFunction.validate(self, n_bands=n_bands)
 
         if "k" in (self.arguments or {}):
@@ -66,7 +67,7 @@ class SumPixelFunction(PixelFunction):
 
 
 class MulPixelFunction(PixelFunction):
-    def __init__(self, constant: int | float | None = None):
+    def __init__(self, constant: int | float | str | None = None) -> None:
         base = SumPixelFunction(constant=constant)
         self.name = "mul"
         for attr in ["arguments", "code", "language"]:
@@ -74,7 +75,7 @@ class MulPixelFunction(PixelFunction):
 
 
 class DivPixelFunction(PixelFunction):
-    def __init__(self, constant: int | float | None = None):
+    def __init__(self, constant: int | float | str | None = None) -> None:
         base = SumPixelFunction(constant=constant)
         self.name = "div"
         for attr in ["arguments", "code", "language"]:
@@ -82,22 +83,22 @@ class DivPixelFunction(PixelFunction):
 
 
 class InvPixelFunction(PixelFunction):
-    def __init__(self):
+    def __init__(self) -> None:
         self.name = "inv"
         self.arguments = self.code = self.language = None
 
 
 class ScalePixelFunction(PixelFunction):
-    def __init__(self):
+    def __init__(self) -> None:
         self.name = "scale"
         self.arguments = self.code = self.language = None
 
+
 class ReplaceNodataPixelFunction(PixelFunction):
-    def __init__(self, value: int | float):
+    def __init__(self, value: int | float | str) -> None:
         self.name = "replace_nodata"
         self.arguments = {"to": misc.number_to_gdal(value)}
         self.code = self.language = None
-        
 
 
 AnyPixelFunction = (
@@ -106,18 +107,20 @@ AnyPixelFunction = (
 
 
 def pixel_function_from_etree(elem: ET.Element) -> AnyPixelFunction:
-
     if (pixel_function_type_elem := elem.find("PixelFunctionType")) is not None:
         name = pixel_function_type_elem.text
+
+        if name is None:
+            raise AssertionError("PixelFunctionType key is empty. Invalid PixelFunction")
     else:
-        raise ValueError("Key PixelFunctionType does not exist. Invalid PixelFunction")
+        raise AssertionError("Key PixelFunctionType does not exist. Invalid PixelFunction")
 
     language = getattr(elem.find("PixelFunctionLanguage"), "text", None)
 
     if (arguments_elem := elem.find("PixelFunctionArguments")) is not None:
         arguments = dict(arguments_elem.items())
     else:
-        arguments = None
+        arguments = {}
 
     code = getattr(elem.find("PixelFunctionCode"), "text", None)
 
