@@ -67,8 +67,8 @@ plt.show()
 dhdt.write("dhdt_2000-2020.tif")
 ```
 
-Resampling between the DEMs (in case their spatial extents differ) is done on the fly using bilinear interpolation to the DEM on the left hand side (`dem_2020`).
-The exact parameters can be customized if needed.
+Resampling between the DEMs (in case their spatial extents differ) is done using the `.warp()` method and a reference dataset, for example: `dem_2020_warped = dem_2020.warp(dem_2000)`.
+The exact parameters in case a reference dataset does not exist and the warping algorithm can be customized if needed.
 
 Note that the pixel values of the `dhdt` variable are not calculated until `dhdt.read(1)` is called; before, it simply represents the "recipe" on how to generate the pixels.
 

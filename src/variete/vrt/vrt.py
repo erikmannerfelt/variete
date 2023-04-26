@@ -89,13 +89,20 @@ def vrt_warp(
     dst_bounds: BoundingBox | list[float] | None = None,
     # src_transform: Affine | None = None,
     dst_transform: Affine | None = None,
+    src_nodata: int | float | None = None,
+    dst_nodata: int | float | None = None,
     resampling: Resampling | str = "bilinear",
     multithread: bool = False,
 ) -> None:
     if isinstance(resampling, str):
         resampling = getattr(Resampling, resampling)
 
-    kwargs = {"resampleAlg": misc.resampling_rio_to_gdal(resampling), "multithread": multithread, "format": "VRT"}
+    kwargs = {"resampleAlg": misc.resampling_rio_to_gdal(resampling), "multithread": multithread, "format": "VRT", "dstNodata": dst_nodata, "srcNodata": src_nodata}
+
+    # This is strange. Warped pixels that are outside the range of the original raster get assigned to 0
+    # Unclear if this can be overridden somehow! It should be dst_nodata or np.nan
+    if kwargs["dstNodata"] is None:
+        kwargs["dstNodata"] = 0
 
     for key, crs in [("dstSRS", dst_crs)]:
         if crs is None:

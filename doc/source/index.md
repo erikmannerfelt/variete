@@ -29,7 +29,7 @@ As for pronunciation of the package name, it is like spoken Latin; every languag
 ## Features
 `variete` provides a simple interface to generate on-the-fly instructions for:
 
-- Warping between coordinate systems.
+- Warping between spatial extents, resolutions, and coordinate systems.
 - Cropping / resampling rasters.
 - Generating mosaics.
 - Performing arithmetic on or between rasters.

@@ -416,3 +416,42 @@ def test_write_scenarios(compress: str | None, dtype: str, tiled: bool) -> None:
                 assert raster.profile["compress"] == compress
 
             assert np.equal(raster_a_params["data"], raster.read(1)).all()
+
+
+def test_different_transforms_and_shapes() -> None:
+    """Test that vrasters with different transforms or shapes error out expectedly."""
+    two_arr = np.ones((50, 100), dtype="float32") + 1
+    four_arr = two_arr.copy() + 2
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path_a = Path(temp_dir).joinpath("test_a.tif")
+        make_test_raster(test_raster_path_a, assign_values=two_arr)
+
+        test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
+        # Make raster which is both slightly smaller and is shifted 4 pixels east
+        make_test_raster(test_raster_path_b, assign_values=four_arr[:49, :], transform = rio.transform.from_origin(5e5 + 40, 8.7e6, 10, 10))
+
+        vrst_a = VRaster.load_file(test_raster_path_a)
+        vrst_b = VRaster.load_file(test_raster_path_b)
+
+        with pytest.raises(AssertionError, match="Transforms must be the same.*"):
+            vrst_b - vrst_a
+
+        # Override the wrong transform. Now, only the shape should be wrong.
+        vrst_b_correct_transform = vrst_b.copy()
+        vrst_b_correct_transform.last.transform = vrst_a.transform
+
+        with pytest.raises(AssertionError, match="Shapes must be the same.*"):
+            vrst_b_correct_transform - vrst_a
+            
+
+        # Warp the raster and then subtract, which should work
+        vrst_b_warped = vrst_b.warp(vrst_a, resampling="nearest").replace_nodata(np.nan)
+        diff = vrst_b_warped - vrst_a
+
+        # Validate that the difference is as expected
+        assert not np.all(diff.read(1) == 2.)
+        assert np.all(np.isnan(diff.sample_rowcol(0, list(range(4)))))
+        assert np.all(diff.sample_rowcol(0, list(range(4, diff.shape[0]))) == 2.)
+
+    

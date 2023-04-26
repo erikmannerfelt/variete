@@ -20,9 +20,9 @@ def make_test_raster(
     mean_val: int | float | None = None,
     assign_values: npt.NDArray[Any] | None = None,
     dtype: str = "float32",
+    transform = rio.transform.from_origin(5e5, 8.7e6, 10, 10)
 ) -> dict[str, Any]:
     crs = rio.crs.CRS.from_epsg(32633)
-    transform = rio.transform.from_origin(5e5, 8.7e6, 10, 10)
 
     if assign_values is not None:
         data = assign_values

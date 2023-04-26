@@ -125,6 +125,12 @@ class VRaster:
 
         if self.n_bands != other.n_bands:
             return f"Number of bands must be the same: {self.n_bands} != {other.n_bands}"
+
+        if self.transform != other.transform:
+            return f"Transforms must be the same: {self.transform} != {other.transform}"
+
+        if self.shape != other.shape:
+            return f"Shapes must be the same: {self.shape} != {other.shape}"
         return None
 
     @overload
@@ -433,6 +439,7 @@ class VRaster:
         bounds: BoundingBox | list[float] | None = None,
         transform: Affine | None = None,
         resampling: Resampling | str = "bilinear",
+        dst_nodata: int | float | None = None,
         multithread: bool = False,
     ) -> VRaster:
         """
@@ -460,6 +467,8 @@ class VRaster:
         resampling
             The target resampling algorithm, e.g. "bilinear" or "cubic_spline".
             See rio.warp.Resampling for all available algorithms.
+        dst_nodata
+            Destination nodata value to use after warping. Defaults to the source nodata value.
         multithread
             Use multithreading for the warp operation.
 
@@ -475,8 +484,14 @@ class VRaster:
             "dst_shape": shape,
             "dst_bounds": bounds,
             "dst_transform": transform,
+            "dst_nodata": dst_nodata,
             "resampling": resampling,
         }
+
+        for band in self.last.raster_bands:
+            if band.nodata is not None:
+                warp_kwargs["src_nodata"] = band.nodata
+                break
 
         if reference is not None:
             for key, value in [
@@ -523,9 +538,11 @@ class VRaster:
         -------
         A new VRaster
         """
+        # TODO: When no nodata value exists, rio throws an unhelpful error when trying to read. It's not as simple as
+        # just checking for self.nodata (yet; 2023-04-26), because nodata values may be inherited in many ways.
+        # Either the self.nodata property should be better, or a custom error handler be made.
         new_vraster = self.copy()
         new = new_vraster.last.copy()
-
         for i, band in enumerate(new.raster_bands):
             new_band = VRTDerivedRasterBand.from_raster_band(
                 band=band, pixel_function=pixel_functions.ReplaceNodataPixelFunction(value=value)
@@ -650,6 +667,19 @@ class VRaster:
     @property
     def last(self) -> VRTDataset:
         return self.steps[-1].dataset
+
+    @property
+    def nodata(self) -> int | float | None:
+        """Get the first nodata value in the raster."""
+        for band in self.last.raster_bands:
+            if band.nodata is not None:
+                return band.nodata
+
+    @nodata.setter
+    def nodata(self, new_nodata: float | int | None) -> None:
+        """Set the first nodata value in the raster."""
+        for band in self.last.raster_bands:
+            band.nodata = new_nodata 
 
     @overload
     def sample(
