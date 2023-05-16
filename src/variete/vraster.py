@@ -58,10 +58,35 @@ class VRasterStep:
 
     dataset: AnyVRTDataset
     name: str
+    parents: list[VRasterStep]
 
-    def __init__(self, dataset: AnyVRTDataset, name: str):
-        for attr in ["dataset", "name"]:
+    def __init__(self, dataset: AnyVRTDataset, name: str, parents: list[VRasterStep] | None = None):
+        if parents is None:
+            parents = []
+        for attr in ["dataset", "name", "parents"]:
             setattr(self, attr, locals()[attr])
+
+    def __repr__(self) -> str:
+        return f"VRasterStep: name = {self.name}, n_parents: {len(self.parents)}\n{self.dataset}"
+
+        
+    def new_child(self, dataset: AnyVRTDataset, name: str) -> VRasterStep:
+        """
+        Create a new VRasterStep and signal that it is created from this step.
+
+        Parameters
+        ----------
+        dataset:
+            The new VRT dataset
+        name
+            The name of the new VRasterStep
+
+        Returns
+        -------
+        A new VRasterStep with the parent being the current VRasterStep.
+        """
+        return self.__class__(dataset=dataset, name=name, parents=[self])
+
 
 
 class VRaster:
@@ -75,10 +100,10 @@ class VRaster:
     # The steps list is a (largely) unordered list of steps and dependencies to the last (current) dataset
     # The last dataset (VRaster.steps[-1]) is always the current one, but no other step is required for evaluation.
     # All other steps are only to show the steps that were taken to get to the latest, and are all self-contained.
-    steps: list[VRasterStep]
+    _steps: list[VRasterStep]
 
     def __init__(self, steps: list[VRasterStep] | None = None):
-        self.steps = steps or []
+        self._steps = steps or []
 
     @classmethod
     def load_file(cls, filepath: str | Path) -> VRaster:
@@ -132,6 +157,18 @@ class VRaster:
         if self.shape != other.shape:
             return f"Shapes must be the same: {self.shape} != {other.shape}"
         return None
+
+
+    def history_items(self) -> list[dict[str, str | VRasterStep]]:
+
+        items = [{"depth": "current", "step": self.steps[-1]}]
+
+
+        return items
+
+        ...
+
+        
 
     @overload
     def read(
@@ -307,6 +344,8 @@ class VRaster:
         new_vraster = self.copy()
         new = new_vraster.last.copy()
 
+        parents = [new_vraster.steps[-1]]
+
         if isinstance(other, VRaster):
             if (message := self._check_compatibility(other)) is not None:
                 raise AssertionError(message)
@@ -335,6 +374,8 @@ class VRaster:
                     ]
 
                     new.raster_bands[i] = new_band
+
+            parents.append(other.steps[-1])
             name = "add_vraster"
 
         else:
@@ -356,7 +397,7 @@ class VRaster:
                     new.raster_bands[i] = new_band
             name = "add_constant"
 
-        new_vraster.steps.append(VRasterStep(new, name))
+        new_vraster.steps.append(VRasterStep(new, name, parents=parents))
         return new_vraster
 
     def multiply(self, other: int | float | VRaster) -> VRaster:
@@ -375,6 +416,7 @@ class VRaster:
         new_vraster = self.copy()
 
         new = new_vraster.last.copy()
+        parents = [new_vraster.steps[-1]]
         if isinstance(other, VRaster):
             if (message := self._check_compatibility(other)) is not None:
                 raise AssertionError(message)
@@ -406,6 +448,7 @@ class VRaster:
 
             # raise NotImplementedError("Not yet implemented for VRaster")
             name = "multiply_vraster"
+            parents.append(other.steps[-1])
         else:
             for i, band in enumerate(new.raster_bands):
                 if misc.nested_getattr(band, ["pixel_function", "name"]) == "scale":
@@ -427,7 +470,7 @@ class VRaster:
                     new.raster_bands[i] = new_band
             name = "multiply_constant"
 
-        new_vraster.steps.append(VRasterStep(new, name))
+        new_vraster.steps.append(VRasterStep(new, name, parents=parents))
         return new_vraster
 
     def warp(
@@ -520,8 +563,11 @@ class VRaster:
         for band in new.raster_bands:
             band.sources = [SimpleSource(source_filename=warped, source_band=band.band)]
 
-        new_vraster.steps.append(VRasterStep(warped, "warp"))
-        new_vraster.steps.append(VRasterStep(new, "warp_wrapped"))
+        new_vraster.steps.append(new_vraster.steps[-1].new_child(warped, "warp"))
+        if isinstance(reference, VRaster):
+            new_vraster.steps[-1].parents.append(reference)
+            
+        new_vraster.steps.append(new_vraster.steps[-1].new_child(new, "warp_wrapped"))
 
         return new_vraster
 
@@ -550,7 +596,7 @@ class VRaster:
             new_band.sources = [SimpleSource(source_filename=new_vraster.last, source_band=i + 1)]
             new.raster_bands[i] = new_band
 
-        new_vraster.steps.append(VRasterStep(new, "replace_nodata"))
+        new_vraster.steps.append(new_vraster.steps[-1].new_child(new, "replace_nodata"))
         return new_vraster
 
     def inverse(self) -> VRaster:
@@ -570,7 +616,7 @@ class VRaster:
             new_band.sources = [SimpleSource(source_filename=new_vraster.last, source_band=i + 1)]
             new.raster_bands[i] = new_band
 
-        new_vraster.steps.append(VRasterStep(new, "inverse"))
+        new_vraster.steps.append(new_vraster.steps[-1].new_child(new, "inverse"))
         return new_vraster
 
     def divide(self, other: int | float | VRaster) -> VRaster:
@@ -609,7 +655,7 @@ class VRaster:
 
                 new.raster_bands[i] = new_band
 
-            new_vraster.steps.append(VRasterStep(new, "divide_vraster"))
+            new_vraster.steps.append(VRasterStep(new, "divide_vraster", parents=[self.steps[-1], other.steps[-1]]))
         else:
             new_vraster = self.multiply(1 / other)
             new_vraster.steps[-1].name = "divide_constant"
@@ -638,39 +684,57 @@ class VRaster:
         return new
 
     @property
+    def steps(self) -> list[VRasterStep]:
+        """
+        The steps associated with the creation of the current VRaster.
+
+        The last step is the current VRasterStep that represents the VRaster.
+        The order may be non-chronological; for a better log, see VRaster.history()
+        """
+        return self._steps
+
+    @property
     def n_bands(self) -> int:
+        """The number of bands in the raster."""
         return self.last.n_bands
 
     @property
     def crs(self) -> CRS:
+        """The Coordinate Reference System (CRS) of the raster."""
         return self.last.crs
 
     @property
     def transform(self) -> Affine:
+        """The affine transformation matrix of the raster."""
         return self.last.transform
 
     @property
     def bounds(self) -> BoundingBox:
+        """The bounding box representing the outer boundary of the raster."""
         return self.last.bounds
 
     @property
     def res(self) -> tuple[float, float]:
+        """The X/Y (horizontal/vertical) resolution of the raster.""" 
         return self.last.res
 
     def copy(self) -> VRaster:
+        """Copy the raster to a new independent object."""
         return copy.deepcopy(self)
 
     @property
     def shape(self) -> tuple[int, int]:
+        """The shape of the raster in pixels (height, width)."""
         return self.last.shape
 
     @property
     def last(self) -> VRTDataset:
+        """The current VRTDataset that represents the VRaster."""
         return self.steps[-1].dataset
 
     @property
     def nodata(self) -> int | float | None:
-        """Get the first nodata value in the raster."""
+        """The first nodata value in the raster."""
         for band in self.last.raster_bands:
             if band.nodata is not None:
                 return band.nodata

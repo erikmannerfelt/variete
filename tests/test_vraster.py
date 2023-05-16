@@ -455,3 +455,21 @@ def test_different_transforms_and_shapes() -> None:
         assert np.all(diff.sample_rowcol(0, list(range(4, diff.shape[0]))) == 2.)
 
     
+
+def test_vraster_history() -> None:
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        make_test_raster(test_raster_path)
+
+        vrst = VRaster.load_file(test_raster_path).inverse().add(1.)
+
+
+        print(vrst.history_items())
+
+        raise NotImplementedError()
+
+
+    
+
+    
