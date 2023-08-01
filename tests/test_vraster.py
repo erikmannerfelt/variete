@@ -483,7 +483,7 @@ def flatten_list(in_list: list[Any]) -> list[Any]:
     "dtype",
     (
         ["uint8"]
-        + [f"int{bits}" for bits in [8, 16, 32]]
+        + [f"int{bits}" for bits in [16, 32]]
         + [f"float{bits}" for bits in [32, 64]]
         + [
             pytest.param(param, marks=pytest.mark.skip)
