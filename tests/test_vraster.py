@@ -1,6 +1,8 @@
 import tempfile
 from pathlib import Path
+from typing import Any
 
+import lxml.etree as ET
 import numpy as np
 import pytest
 import rasterio as rio
@@ -429,7 +431,11 @@ def test_different_transforms_and_shapes() -> None:
 
         test_raster_path_b = Path(temp_dir).joinpath("test_b.tif")
         # Make raster which is both slightly smaller and is shifted 4 pixels east
-        make_test_raster(test_raster_path_b, assign_values=four_arr[:49, :], transform = rio.transform.from_origin(5e5 + 40, 8.7e6, 10, 10))
+        make_test_raster(
+            test_raster_path_b,
+            assign_values=four_arr[:49, :],
+            transform=rio.transform.from_origin(5e5 + 40, 8.7e6, 10, 10),
+        )
 
         vrst_a = VRaster.load_file(test_raster_path_a)
         vrst_b = VRaster.load_file(test_raster_path_b)
@@ -443,15 +449,80 @@ def test_different_transforms_and_shapes() -> None:
 
         with pytest.raises(AssertionError, match="Shapes must be the same.*"):
             vrst_b_correct_transform - vrst_a
-            
 
         # Warp the raster and then subtract, which should work
         vrst_b_warped = vrst_b.warp(vrst_a, resampling="nearest").replace_nodata(np.nan)
         diff = vrst_b_warped - vrst_a
 
         # Validate that the difference is as expected
-        assert not np.all(diff.read(1) == 2.)
+        assert not np.all(diff.read(1) == 2.0)
         assert np.all(np.isnan(diff.sample_rowcol(0, list(range(4)))))
-        assert np.all(diff.sample_rowcol(0, list(range(4, diff.shape[0]))) == 2.)
+        assert np.all(diff.sample_rowcol(0, list(range(4, diff.shape[0]))) == 2.0)
 
-    
+
+def load_vrt_schema() -> ET.XMLSchema:
+    with open(Path(__file__).with_name("gdalvrt.xsd"), "rb") as infile:
+        return ET.XMLSchema(ET.fromstring(infile.read()))
+
+
+def flatten_list(in_list: list[Any]) -> list[Any]:
+    new_list = []
+    for item in in_list:
+        if isinstance(item, list):
+            new_list += flatten_list(item)
+        else:
+            new_list.append(item)
+    return new_list
+
+
+@pytest.mark.parametrize(
+    "crs", [32633, pytest.param(4326, marks=pytest.mark.skip)]
+)  # 4326 is skipped because it fails on warping. Opening an issue (2023-08-01)
+@pytest.mark.parametrize("nodata", [None, 1.0, 99])
+@pytest.mark.parametrize(
+    "dtype",
+    (
+        ["uint8"]
+        + [f"int{bits}" for bits in [8, 16, 32]]
+        + [f"float{bits}" for bits in [32, 64]]
+        + [
+            pytest.param(param, marks=pytest.mark.skip)
+            for param in flatten_list(
+                [
+                    ["int64"],
+                    [f"uint{bits}" for bits in [16, 32, 64]],
+                    [f"complex{bits}" for bits in [64, 128]],
+                ]
+            )
+        ]
+        + [
+            pytest.param(param, marks=pytest.mark.xfail)
+            for param in flatten_list(
+                [["float16"], ["complex32"]]  # This is not supported by GDAL  # This is not supported by numpy
+            )
+        ]
+    ),
+)
+def test_vrt_schema(crs: int, nodata: int | float | None, dtype: str) -> None:
+    schema = load_vrt_schema()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_raster_path = Path(temp_dir).joinpath("test.tif")
+        make_test_raster(test_raster_path, crs=crs, nodata=nodata, dtype=dtype)
+
+        vrst = VRaster.load_file(test_raster_path)
+
+        # Test addition (creating a nested VRT)
+        vrst += 1
+        # Test inversion (another op., creating a nested VRT)
+        vrst = vrst.inverse()
+
+        # Test warping (creating a nested warped VRT)
+        vrst = vrst.warp(crs=rio.CRS.from_epsg(3006))
+
+        vrt_paths = vrst.save_vrt(Path(temp_dir).joinpath("a.vrt"))
+
+        # Validate all VRTs with the schema
+        for filepath in vrt_paths:
+            with open(filepath, "rb") as infile:
+                schema.assertValid(ET.fromstring(infile.read()))
