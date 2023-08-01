@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import copy
 import warnings
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import lxml.etree as ET
 
 from variete import misc
 

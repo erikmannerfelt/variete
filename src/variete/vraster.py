@@ -674,12 +674,13 @@ class VRaster:
         for band in self.last.raster_bands:
             if band.nodata is not None:
                 return band.nodata
+        return None
 
     @nodata.setter
     def nodata(self, new_nodata: float | int | None) -> None:
         """Set the first nodata value in the raster."""
         for band in self.last.raster_bands:
-            band.nodata = new_nodata 
+            band.nodata = new_nodata
 
     @overload
     def sample(

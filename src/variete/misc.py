@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from typing import Any, Literal, overload
 
+import lxml.etree as ET
 from rasterio import CRS, Affine
 from rasterio.warp import Resampling
 
