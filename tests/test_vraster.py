@@ -498,7 +498,7 @@ def flatten_list(in_list: list[Any]) -> list[Any]:
         + [
             pytest.param(param, marks=pytest.mark.xfail)
             for param in flatten_list(
-                [["float16"], ["complex32"]]  # This is not supported by GDAL  # This is not supported by numpy
+                [["float16"], ["complex32"]]  # float16 is not supported by GDAL  # complex32 is not supported by numpy
             )
         ]
     ),

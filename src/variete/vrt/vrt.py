@@ -387,11 +387,15 @@ class VRTDataset:
         else:
             y_coords = y_coord
         with self.open_rio() as raster:
-            values = np.fromiter(
-                raster.sample(zip(x_coords, y_coords), indexes=band, masked=masked),
-                dtype=self.raster_bands[0].dtype,
-                count=-1 if not hasattr(x_coords, "__len__") else len(x_coords),  # type: ignore
-            ).ravel()
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", r".*Conversion of an array with ndim > 0 to a scalar is deprecated.*"
+                )  # Should be removed when rasterio fixes this (2023-08-02)
+                values = np.fromiter(
+                    raster.sample(zip(x_coords, y_coords), indexes=band, masked=masked),
+                    dtype=self.raster_bands[0].dtype,
+                    count=-1 if not hasattr(x_coords, "__len__") else len(x_coords),  # type: ignore
+                ).ravel()
             if values.size > 1:
                 return values
             return values[0]
