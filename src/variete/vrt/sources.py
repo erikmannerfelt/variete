@@ -28,7 +28,7 @@ class SourceProperties:
             {
                 "RasterXSize": str(self.shape[1]),
                 "RasterYSize": str(self.shape[0]),
-                "DataType": self.dtype.capitalize(),
+                "DataType": misc.dtype_numpy_to_gdal(self.dtype),
                 "BlockYSize": str(self.block_size[0]),
                 "BlockXSize": str(self.block_size[1]),
             },
@@ -37,7 +37,7 @@ class SourceProperties:
     @classmethod
     def from_etree(cls, elem: ET.Element) -> SourceProperties:
         shape = (int(elem.get("RasterYSize", 0)), int(elem.get("RasterXSize", 0)))
-        dtype = elem.get("DataType", "Byte").lower()
+        dtype = misc.dtype_gdal_to_numpy(elem.get("DataType", "Byte"))
         block_size = (int(elem.get("BlockYSize", "1")), int(elem.get("BlockXSize", "1")))
 
         return cls(shape=shape, dtype=dtype, block_size=block_size)
