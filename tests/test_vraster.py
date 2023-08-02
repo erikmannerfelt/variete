@@ -486,14 +486,7 @@ def flatten_list(in_list: list[Any]) -> list[Any]:
         + [f"int{bits}" for bits in [16, 32, 64]]
         + [f"float{bits}" for bits in [32, 64]]
         + [f"uint{bits}" for bits in [16, 32, 64]]
-        + [
-            pytest.param(param, marks=pytest.mark.skip)
-            for param in flatten_list(
-                [
-                    [f"complex{bits}" for bits in [64, 128]],
-                ]
-            )
-        ]
+        + [f"complex{bits}" for bits in [64, 128]]
         + [
             pytest.param(param, marks=pytest.mark.xfail)
             for param in flatten_list(

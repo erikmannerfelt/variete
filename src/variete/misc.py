@@ -45,11 +45,14 @@ def get_dtype_gdal_to_numpy() -> dict[str, str]:
 
     for number, bits in [("float", [32, 64]), ("int", [16, 32, 64])]:
         for bit in bits:
-            dtype = f"{number}{bit}".capitalize()
+            dtype = f"{number}{bit}"
             dtypes[dtype.capitalize()] = dtype
 
             if number == "int":
                 dtypes[f"UInt{bit}"] = f"uint{bit}"
+
+    for bit in [32, 64]:
+        dtypes[f"CFloat{bit}"] = f"complex{bit * 2}"
 
     return dtypes
 
