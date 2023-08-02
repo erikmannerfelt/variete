@@ -42,7 +42,7 @@ def resampling_rio_to_gdal(resampling: Resampling) -> str:
 
 def get_dtype_gdal_to_numpy() -> dict[str, str]:
     dtypes = {"Byte": "uint8"}
-    for dtype in ["float32", "float64", "int16", "int32"]:
+    for dtype in ["float32", "float64", "int16", "int32", "int64"]:
         dtypes[dtype.capitalize()] = dtype
 
     for gdal_dtype in ["UInt16", "UInt32"]:
