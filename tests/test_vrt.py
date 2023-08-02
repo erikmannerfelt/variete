@@ -20,9 +20,12 @@ def make_test_raster(
     mean_val: int | float | None = None,
     assign_values: npt.NDArray[Any] | None = None,
     dtype: str = "float32",
-    transform = rio.transform.from_origin(5e5, 8.7e6, 10, 10)
+    transform: rio.transform.Affine | None = None,
+    crs: int = 32633,
 ) -> dict[str, Any]:
-    crs = rio.crs.CRS.from_epsg(32633)
+    crs = rio.crs.CRS.from_epsg(crs)
+    if transform is None:
+        transform = rio.transform.from_origin(5e5, 8.7e6, 10, 10)
 
     if assign_values is not None:
         data = assign_values
@@ -208,7 +211,7 @@ def test_vrt_warp(test_case: dict[str, object]) -> None:
         result = test_case.pop("result")
 
         if result != "pass":
-            with pytest.raises(ValueError, match=result):
+            with pytest.raises(ValueError, match=result):  # type: ignore
                 variete.vrt.vrt.vrt_warp(test_vrt_path, test_raster_path, **test_case)  # type: ignore
             return
         else:

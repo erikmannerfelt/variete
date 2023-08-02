@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import warnings
-import xml.etree.ElementTree as ET
+
+import lxml.etree as ET
 
 from variete import misc
 from variete.vrt.pixel_functions import AnyPixelFunction, pixel_function_from_etree

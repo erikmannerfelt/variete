@@ -6,6 +6,7 @@ dependencies:
   - rasterio
   - gdal>=3.2
   - tqdm
+  - lxml
 
   - pytest
   - flake8

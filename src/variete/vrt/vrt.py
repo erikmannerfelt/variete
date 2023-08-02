@@ -4,11 +4,11 @@ import copy
 import hashlib
 import tempfile
 import warnings
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable, Iterable, Literal, Sequence
 
+import lxml.etree as ET
 import numpy as np
 import numpy.typing as npt
 import rasterio as rio
@@ -97,7 +97,13 @@ def vrt_warp(
     if isinstance(resampling, str):
         resampling = getattr(Resampling, resampling)
 
-    kwargs = {"resampleAlg": misc.resampling_rio_to_gdal(resampling), "multithread": multithread, "format": "VRT", "dstNodata": dst_nodata, "srcNodata": src_nodata}
+    kwargs = {
+        "resampleAlg": misc.resampling_rio_to_gdal(resampling),
+        "multithread": multithread,
+        "format": "VRT",
+        "dstNodata": dst_nodata,
+        "srcNodata": src_nodata,
+    }
 
     # This is strange. Warped pixels that are outside the range of the original raster get assigned to 0
     # Unclear if this can be overridden somehow! It should be dst_nodata or np.nan
@@ -381,11 +387,15 @@ class VRTDataset:
         else:
             y_coords = y_coord
         with self.open_rio() as raster:
-            values = np.fromiter(
-                raster.sample(zip(x_coords, y_coords), indexes=band, masked=masked),
-                dtype=self.raster_bands[0].dtype,
-                count=-1 if not hasattr(x_coords, "__len__") else len(x_coords),  # type: ignore
-            ).ravel()
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", r".*Conversion of an array with ndim > 0 to a scalar is deprecated.*"
+                )  # Should be removed when rasterio fixes this (2023-08-02)
+                values = np.fromiter(
+                    raster.sample(zip(x_coords, y_coords), indexes=band, masked=masked),
+                    dtype=self.raster_bands[0].dtype,
+                    count=-1 if not hasattr(x_coords, "__len__") else len(x_coords),  # type: ignore
+                ).ravel()
             if values.size > 1:
                 return values
             return values[0]

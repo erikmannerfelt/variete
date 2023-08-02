@@ -12,6 +12,8 @@
 
         python_with_pkgs = (pythonpkgs.python.withPackages (_: with pythonpkgs; [
           python
+          ipython
+          lxml
           rasterio
           gdal
           pytest
